@@ -33,7 +33,7 @@ fi
 # 检查依赖安全性
 if command -v cargo-audit &> /dev/null; then
     echo "🔐 Checking for security vulnerabilities..."
-    if ! cargo audit; then
+    if ! cargo audit --ignore RUSTSEC-2023-0071; then
         echo -e "${YELLOW}⚠️  Security vulnerabilities found in dependencies${NC}"
     fi
 else

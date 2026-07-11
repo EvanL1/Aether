@@ -16,10 +16,12 @@ removal condition is recorded here.
 - **Default exposure:** none. The `opcua` Cargo feature is disabled by default.
 - **Compensating control:** use a trusted, isolated field network or a separately
   audited OPC UA bridge whenever transport security or authentication is needed.
-- **Removal condition:** remove the `cargo-deny` exception and the temporary
-  runtime restriction once `async-opcua` no longer resolves to an affected
-  `rsa` release; then add authenticated and encrypted integration tests before
-  re-enabling those modes.
+- **Audit policy:** both `deny.toml` and the CI/local `cargo audit` invocation
+  ignore only `RUSTSEC-2023-0071`; every other advisory remains denied.
+- **Removal condition:** remove the `cargo-deny` and `cargo-audit` exceptions
+  plus the temporary runtime restriction once `async-opcua` no longer resolves
+  to an affected `rsa` release; then add authenticated and encrypted
+  integration tests before re-enabling those modes.
 - **Review owner:** maintainers; review on every `async-opcua` update and at
   least once per release.
 

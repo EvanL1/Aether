@@ -45,7 +45,10 @@ jobs:
         uses: taiki-e/install-action@cargo-audit
 
       - name: Audit Cargo.lock
-        run: cargo audit
+        # RUSTSEC-2023-0071 has no fixed release. The affected RSA operations
+        # are unreachable behind the enforced OPC UA SecurityPolicy::None
+        # boundary documented in docs/security/dependency-exceptions.md.
+        run: cargo audit --ignore RUSTSEC-2023-0071
 
   cargo-deny:
     name: Dependency Policy

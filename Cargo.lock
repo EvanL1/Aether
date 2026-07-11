@@ -3562,9 +3562,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.13"
+version = "0.11.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1906b49b0c3bc04b5fe5d86a77925ae6524a19b816ae38ce1e426255f1d8a31"
+checksum = "4fcb935c5bec503c2f0e306bdd3e58bb9029dcb14fa8d9ac76e3a5256ac0763e"
 dependencies = [
  "bytes",
  "getrandom 0.3.4",
@@ -6197,9 +6197,11 @@ dependencies = [
  "fastrand",
  "form_urlencoded",
  "futures-channel",
+ "futures-core",
  "futures-executor",
  "futures-io",
  "futures-sink",
+ "futures-task",
  "futures-util",
  "getrandom 0.2.16",
  "hyper",
@@ -6210,6 +6212,7 @@ dependencies = [
  "mio",
  "num-traits",
  "once_cell",
+ "percent-encoding",
  "proc-macro2",
  "quote",
  "rand 0.8.6",
@@ -6235,6 +6238,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
