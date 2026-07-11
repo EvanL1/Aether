@@ -9,10 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Test-only value. Production Compose requires an operator-generated secret.
-  JWT_SECRET_KEY: 0123456789abcdef0123456789abcdef
-  # Test-only and deliberately distinct from JWT_SECRET_KEY.
-  AETHER_UPLINK_CONTROL_TOKEN: fedcba9876543210fedcba9876543210
 
 jobs:
   # Job 0: Ensure submodules track the latest remote commit

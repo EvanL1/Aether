@@ -73,8 +73,16 @@ for source_dir in "${RUNTIME_SOURCE_DIRS[@]}"; do
     fi
 done
 
-readonly COMPOSE_TEST_SECRET='0123456789abcdef0123456789abcdef'
-readonly COMPOSE_TEST_UPLINK_TOKEN='abcdef0123456789abcdef0123456789'
+if ! command -v openssl >/dev/null 2>&1; then
+    echo "ERROR: openssl is required to generate ephemeral Compose test credentials" >&2
+    exit 1
+fi
+readonly COMPOSE_TEST_SECRET="$(openssl rand -hex 32)"
+readonly COMPOSE_TEST_UPLINK_TOKEN="$(openssl rand -hex 32)"
+if [[ "$COMPOSE_TEST_SECRET" == "$COMPOSE_TEST_UPLINK_TOKEN" ]]; then
+    echo "ERROR: generated Compose test credentials must be distinct" >&2
+    exit 1
+fi
 
 if JWT_SECRET_KEY="$COMPOSE_TEST_SECRET" \
     AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_TEST_UPLINK_TOKEN" \

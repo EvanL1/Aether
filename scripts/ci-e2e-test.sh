@@ -462,8 +462,16 @@ fi
 print_phase "[Phase 6] aether-automation Routing Pointer Verification (C2M + M2C)"
 
 echo -e "${LINE_V} Starting aether-automation..."
-E2E_JWT_SECRET="0123456789abcdef0123456789abcdef"
-E2E_CONTROL_TOKEN="abcdef0123456789abcdef0123456789"
+if ! command -v openssl >/dev/null 2>&1; then
+    echo -e "${LINE_V} ${RED}✗${NC} openssl is required to generate E2E credentials"
+    exit 1
+fi
+E2E_JWT_SECRET="$(openssl rand -hex 32)"
+E2E_CONTROL_TOKEN="$(openssl rand -hex 32)"
+if [[ "$E2E_JWT_SECRET" == "$E2E_CONTROL_TOKEN" ]]; then
+    echo -e "${LINE_V} ${RED}✗${NC} generated E2E credentials are not distinct"
+    exit 1
+fi
 AETHER_DB_PATH=/tmp/e2e_io.db/aether.db \
 REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}" \
 JWT_SECRET_KEY="$E2E_JWT_SECRET" \

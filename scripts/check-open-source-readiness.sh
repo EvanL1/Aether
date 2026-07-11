@@ -38,8 +38,17 @@ readonly PUBLIC_PACKAGES=(
     "aether-redis-bridge:extensions/redis-bridge"
     "aether-postgres-history:extensions/postgres-history"
 )
-readonly COMPOSE_VALIDATION_JWT_SECRET='0123456789abcdef0123456789abcdef'
-readonly COMPOSE_VALIDATION_UPLINK_TOKEN='fedcba9876543210fedcba9876543210'
+
+generate_validation_credential() {
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "openssl is required to generate ephemeral Compose validation credentials" >&2
+        return 1
+    fi
+    openssl rand -hex 32
+}
+
+readonly COMPOSE_VALIDATION_JWT_SECRET="$(generate_validation_credential)"
+readonly COMPOSE_VALIDATION_UPLINK_TOKEN="$(generate_validation_credential)"
 
 failures=0
 
@@ -47,6 +56,10 @@ fail() {
     echo "ERROR: $*" >&2
     failures=$((failures + 1))
 }
+
+if [[ "$COMPOSE_VALIDATION_JWT_SECRET" == "$COMPOSE_VALIDATION_UPLINK_TOKEN" ]]; then
+    fail "generated Compose validation credentials must be distinct"
+fi
 
 manifest_package_name() {
     awk '
@@ -183,12 +196,16 @@ if ! rg -q '\$SUDO chmod 600 "\$env_file"' scripts/install.sh; then
     fail "install.sh must keep the Compose .env file at mode 0600"
 fi
 
+readonly CI_SETUP_ACTION='.github/actions/setup-rust-env/action.yml'
+if ! rg -Fq 'echo "JWT_SECRET_KEY=$jwt_secret" >> "$GITHUB_ENV"' "$CI_SETUP_ACTION" \
+    || ! rg -Fq 'echo "AETHER_UPLINK_CONTROL_TOKEN=$uplink_token" >> "$GITHUB_ENV"' \
+        "$CI_SETUP_ACTION"; then
+    fail "$CI_SETUP_ACTION must generate ephemeral CI credentials"
+fi
+
 while IFS= read -r workflow; do
-    if ! rg -Fq "JWT_SECRET_KEY: $COMPOSE_VALIDATION_JWT_SECRET" "$workflow"; then
-        fail "$workflow invokes Docker Compose without an explicit CI JWT test key"
-    fi
-    if ! rg -Fq "AETHER_UPLINK_CONTROL_TOKEN: $COMPOSE_VALIDATION_UPLINK_TOKEN" "$workflow"; then
-        fail "$workflow invokes Docker Compose without an explicit CI uplink control token"
+    if ! rg -Fq 'uses: ./.github/actions/setup-rust-env' "$workflow"; then
+        fail "$workflow invokes Docker Compose without the credential-generating CI setup action"
     fi
 done < <(rg -l 'docker compose' .github/workflows --glob '*.yml' --glob '*.yaml' || true)
 
