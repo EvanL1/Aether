@@ -29,6 +29,7 @@ use utoipa_swagger_ui::{Config, SwaggerUi};
 
 mod auth;
 mod config;
+mod data_processing_runtime;
 mod db;
 mod live_values;
 mod middleware_auth;
@@ -36,6 +37,7 @@ mod models;
 mod routes_auth;
 mod routes_broadcast;
 mod routes_config;
+mod routes_data_processing;
 mod routes_homepage;
 mod routes_network;
 mod state;
@@ -216,6 +218,13 @@ async fn ws_handler(
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
+fn commissioned_data_processing_router(state: &AppState) -> Option<Router<Arc<AppState>>> {
+    state
+        .data_processing
+        .as_ref()
+        .map(|_| routes_data_processing::router())
+}
+
 fn build_router(state: Arc<AppState>) -> Router {
     let auth_routes = Router::new()
         .route("/register", post(routes_auth::register))
@@ -271,11 +280,15 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/broadcast/status", get(routes_broadcast::broadcast_status))
         .nest("/homepage", homepage_routes)
         .nest("/network", network_routes)
-        .nest("/config", config_routes)
-        .layer(axum::middleware::from_fn_with_state(
-            Arc::clone(&state),
-            middleware_auth::require_jwt,
-        ));
+        .nest("/config", config_routes);
+    let protected_v1 = match commissioned_data_processing_router(&state) {
+        Some(routes) => protected_v1.nest("/data-processing", routes),
+        None => protected_v1,
+    };
+    let protected_v1 = protected_v1.layer(axum::middleware::from_fn_with_state(
+        Arc::clone(&state),
+        middleware_auth::require_jwt,
+    ));
 
     let api_v1 = Router::new().merge(protected_v1).nest("/auth", auth_routes);
 
@@ -378,6 +391,12 @@ async fn main() -> anyhow::Result<()> {
     db::init_roles(&db_pool).await?;
     db::init_calculated_points(&db_pool).await?;
 
+    // Data Processing is composed only after explicit deployment opt-in. A
+    // disabled deployment neither constructs source/processor clients nor
+    // mounts the corresponding HTTP routes.
+    let data_processing =
+        data_processing_runtime::build_data_processing_application(&db_pool, &cfg).await?;
+
     // ── Bootstrap admin user ──────────────────────────────────────────────────
     ensure_bootstrap_admin(&db_pool, || {
         std::env::var(BOOTSTRAP_ADMIN_PASSWORD_ENV).ok()
@@ -392,6 +411,7 @@ async fn main() -> anyhow::Result<()> {
         db: db_pool,
         config: Arc::new(cfg),
         ws_hub: Arc::clone(&ws_hub),
+        data_processing,
         refresh_tokens: DashMap::new(),
     });
 

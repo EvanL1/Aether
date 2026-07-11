@@ -14,7 +14,7 @@ pub enum OperationKind {
 pub enum RiskLevel {
     /// Observation or local computation with no state mutation.
     Low,
-    /// Reversible or bounded configuration mutation.
+    /// Bounded processing/egress or a reversible configuration mutation.
     Medium,
     /// Device control, restart, upgrade, or another high-impact mutation.
     High,
@@ -31,6 +31,15 @@ pub enum ConfirmationPolicy {
     Always,
 }
 
+/// Whether the application must durably record an invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditPolicy {
+    /// The read-only operation does not require an audit record.
+    NotRequired,
+    /// The operation fails closed when its mandatory audit cannot be recorded.
+    Required,
+}
+
 /// Static metadata shared by CLI, MCP, and optional HTTP transports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilityDescriptor {
@@ -39,6 +48,7 @@ pub struct CapabilityDescriptor {
     risk: RiskLevel,
     required_permission: &'static str,
     confirmation: ConfirmationPolicy,
+    audit: AuditPolicy,
     idempotent: bool,
 }
 
@@ -51,6 +61,7 @@ impl CapabilityDescriptor {
         risk: RiskLevel,
         required_permission: &'static str,
         confirmation: ConfirmationPolicy,
+        audit: AuditPolicy,
         idempotent: bool,
     ) -> Self {
         Self {
@@ -59,6 +70,7 @@ impl CapabilityDescriptor {
             risk,
             required_permission,
             confirmation,
+            audit,
             idempotent,
         }
     }
@@ -99,6 +111,12 @@ impl CapabilityDescriptor {
         matches!(self.confirmation, ConfirmationPolicy::Always)
     }
 
+    /// Returns whether durable auditing is mandatory for the capability.
+    #[must_use]
+    pub const fn audit_policy(self) -> AuditPolicy {
+        self.audit
+    }
+
     /// Returns whether retrying with the same request identity is safe.
     #[must_use]
     pub const fn is_idempotent(self) -> bool {
@@ -113,6 +131,7 @@ pub const READ_POINT_CAPABILITY: CapabilityDescriptor = CapabilityDescriptor::ne
     RiskLevel::Low,
     "device.read",
     ConfirmationPolicy::Never,
+    AuditPolicy::NotRequired,
     true,
 );
 
@@ -123,11 +142,50 @@ pub const WRITE_POINT_CAPABILITY: CapabilityDescriptor = CapabilityDescriptor::n
     RiskLevel::High,
     "device.control",
     ConfirmationPolicy::Always,
+    AuditPolicy::Required,
     false,
 );
 
-const CAPABILITY_CATALOG: [CapabilityDescriptor; 2] =
-    [READ_POINT_CAPABILITY, WRITE_POINT_CAPABILITY];
+/// Discover configured data-processing tasks and bindings.
+pub const TASKS_LIST_CAPABILITY: CapabilityDescriptor = CapabilityDescriptor::new(
+    "data_processing.tasks.list",
+    OperationKind::Query,
+    RiskLevel::Low,
+    "data_processing.read",
+    ConfirmationPolicy::Never,
+    AuditPolicy::NotRequired,
+    true,
+);
+
+/// Discover current processor readiness without sending task data.
+pub const PROCESSOR_HEALTH_CAPABILITY: CapabilityDescriptor = CapabilityDescriptor::new(
+    "data_processing.processors.health",
+    OperationKind::Query,
+    RiskLevel::Low,
+    "data_processing.read",
+    ConfirmationPolicy::Never,
+    AuditPolicy::NotRequired,
+    true,
+);
+
+/// Assemble a governed frame and request derived data from a processor.
+pub const PROCESS_DATA_CAPABILITY: CapabilityDescriptor = CapabilityDescriptor::new(
+    "data_processing.process",
+    OperationKind::Query,
+    RiskLevel::Medium,
+    "data_processing.run",
+    ConfirmationPolicy::Policy,
+    AuditPolicy::Required,
+    false,
+);
+
+const CAPABILITY_CATALOG: [CapabilityDescriptor; 5] = [
+    READ_POINT_CAPABILITY,
+    WRITE_POINT_CAPABILITY,
+    TASKS_LIST_CAPABILITY,
+    PROCESSOR_HEALTH_CAPABILITY,
+    PROCESS_DATA_CAPABILITY,
+];
 
 /// Returns the transport-neutral capability catalog.
 #[must_use]

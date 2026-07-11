@@ -13,6 +13,7 @@ legacy_assets:
   knowledge: docs/domain
 examples:
   config: examples/config
+  data_processing: data-processing
 capabilities:
   models:
     - Station
@@ -26,5 +27,8 @@ capabilities:
     - soc-management
     - peak-shaving
     - demand-control
+  data_processing_tasks:
+    - energy.site-load-forecast
+    - energy.site-pv-forecast
 safety:
   control_policy: ai/safety-policy.yaml

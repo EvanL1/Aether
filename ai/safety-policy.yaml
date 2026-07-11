@@ -11,34 +11,38 @@ risk_levels:
   high:
     confirmation: always
 capabilities:
-  system.describe:
-    kind: query
-    risk: low
-    permission: system.read
-    idempotent: true
   device.read_point:
     kind: query
     risk: low
     permission: device.read
     idempotent: true
+    confirmation: never
+    audit: not_required
+  data_processing.tasks.list:
+    kind: query
+    risk: low
+    permission: data_processing.read
+    idempotent: true
+    confirmation: never
+    audit: not_required
+  data_processing.processors.health:
+    kind: query
+    risk: low
+    permission: data_processing.read
+    idempotent: true
+    confirmation: never
+    audit: not_required
+  data_processing.process:
+    kind: query
+    risk: medium
+    permission: data_processing.run
+    idempotent: false
+    confirmation: policy
+    audit: required
   device.write_point:
     kind: command
     risk: high
     permission: device.control
     idempotent: false
-    confirmation: always
-    audit: required
-  config.apply:
-    kind: command
-    risk: high
-    permission: config.write
-    idempotent: true
-    confirmation: always
-    audit: required
-  runtime.restart:
-    kind: command
-    risk: high
-    permission: runtime.manage
-    idempotent: true
     confirmation: always
     audit: required

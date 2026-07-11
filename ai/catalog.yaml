@@ -21,11 +21,55 @@ components:
     responsibility: Commands, queries, authorization, safety, and audit flow
     verify:
       - cargo test -p aether-application
+  data_processing:
+    path: crates/aether-application/src/data_processing.rs
+    responsibility: Governed frame assembly, processor invocation, untrusted-result validation, and DerivedData stamping
+    verify:
+      - cargo test -p aether-application --test data_processing_application
+      - cargo test -p aether-application --test safety_policy_contract
+  data_processing_codec:
+    path: crates/aether-data-processing
+    responsibility: Strict transport-neutral v1 JSON conversion and RFC 8785 input digests
+    verify:
+      - cargo test -p aether-data-processing
+  data_processing_contracts:
+    path: contracts/data-processing
+    responsibility: Strict Draft 2020-12 wire schemas for every v1 Data Processing trust boundary
+    verify:
+      - uvx --from check-jsonschema check-jsonschema --check-metaschema contracts/data-processing/*.schema.json
+  data_processing_ai_evals:
+    path: ai/evals/data-processing.yaml
+    responsibility: AI-facing permission, confirmation, audit, non-idempotency, failure-isolation, and no-control scenarios backed by Rust tests
+    verify:
+      - ruby -ryaml -e 'YAML.safe_load(File.read(ARGV.fetch(0)), [], [], false)' ai/evals/data-processing.yaml
+      - cargo test -p aether-application --test data_processing_application
+      - cargo test -p aether-http-data-processor --test http_data_processor
+      - cargo test -p aether-example-energy-gateway --test composition_contract
+  data_processing_testkit:
+    path: crates/aether-testkit
+    responsibility: Reusable HistoryQuery and DataProcessor conformance checks and deterministic test doubles
+    verify:
+      - cargo test -p aether-testkit
   local_store:
     path: extensions/store-local
     responsibility: Zero-external-service state, history, audit, and crash-recoverable outbox adapters
     verify:
       - cargo test -p aether-store-local
+  snapshot_covariates:
+    path: extensions/store-local/src/snapshot_covariates.rs
+    responsibility: Bounded, reloadable local covariate snapshots with valid-time and issue-time provenance
+    verify:
+      - cargo test -p aether-store-local --test snapshot_covariate_source
+  sqlite_history_query:
+    path: extensions/sqlite-history-query
+    responsibility: Default read-only SQLite HistoryQuery adapter with task-scoped interval aggregation in one snapshot
+    verify:
+      - cargo test -p aether-sqlite-history-query
+  http_history_query:
+    path: extensions/http-history-query
+    responsibility: Optional loopback HistoryQuery adapter for an upstream pre-aligned Last/Reject cadence grid
+    verify:
+      - cargo test -p aether-http-history-query
   shm_bridge:
     path: extensions/shm-bridge
     responsibility: Transitional read-only adapter from legacy SlotIo to LiveState
@@ -41,6 +85,31 @@ components:
     responsibility: Optional historical and audit persistence
     verify:
       - cargo test -p aether-postgres-history
+  http_data_processor:
+    path: extensions/http-data-processor
+    responsibility: Bounded local or remote HTTP implementation of the DataProcessor port
+    verify:
+      - cargo test -p aether-http-data-processor
+  data_processing_api:
+    path: services/api/src/routes_data_processing.rs
+    responsibility: Opt-in authenticated Data Processing v1 HTTP task discovery, health, and process routes
+    verify:
+      - cargo test -p aether-api --bin aether-api routes_data_processing
+  data_processing_runtime:
+    path: services/api/src/data_processing_runtime.rs
+    responsibility: Opt-in production composition of SQLite history, snapshot covariates, read-only live state, audit, and HTTP processor routes
+    verify:
+      - cargo test -p aether-api --bin aether-api data_processing_runtime
+  load_forecasting_processor:
+    path: integrations/load-forecasting
+    responsibility: Opt-in request-driven adapter around the legacy Load-Forecasting model runtime with no reverse Aether data reads
+    verify:
+      - cd integrations/load-forecasting && uv run pytest
+  energy_data_processing:
+    path: packs/energy/data-processing
+    responsibility: Disabled load/PV task declarations, uncommissioned binding, and cross-language v1 fixtures
+    verify:
+      - cargo test -p aether-example-energy-gateway --test data_processing_composition
   legacy_shm_adapters:
     path: libs/aether-rtdb-shm
     responsibility: Channel, instance, routing, and action adapters during migration

@@ -1,6 +1,8 @@
-# AetherEMS API 参考文档
+# AetherEMS 旧版 API 汇编
 
-本文档提供 AetherEMS 所有 REST API 端点的完整参考。
+本文档保留历史服务端点说明，但不是当前完整 API 契约。认证规则、当前路由以及
+`/api/v1/data-processing/*` 请以
+[`reference/http-api.md`](reference/http-api.md) 为准。
 
 ## 服务概览
 

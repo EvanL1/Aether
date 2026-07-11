@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-readonly CORE_MANIFEST_PATTERN='^(redis|sqlx|bb8|bb8-redis|axum|rumqttc|workspace-hack)[[:space:]]*='
+readonly CORE_MANIFEST_PATTERN='^(redis|sqlx|bb8|bb8-redis|axum|reqwest|rumqttc|aether-http-data-processor|aether-http-history-query|aether-sqlite-history-query|workspace-hack)[[:space:]]*='
 readonly DEFAULT_GRAPH_PATTERN='^(redis|sqlx|sqlx-core|sqlx-postgres|bb8|bb8-redis|workspace-hack) v'
 readonly PERIPHERAL_GRAPH_PATTERN='^(redis|sqlx-postgres|tokio-postgres|postgres-types|postgres-protocol|bb8|bb8-redis|workspace-hack) v'
 
@@ -55,6 +55,18 @@ fi
 cargo tree -p aether-example-energy-gateway --edges normal --prefix none > "$dependency_tree"
 if ! rg -q '^aether-edge-sdk v' "$dependency_tree"; then
     echo "ERROR: the energy distribution does not compose the Aether SDK"
+    exit 1
+fi
+
+echo "Checking data-processing adapter direction..."
+cargo tree -p aether-data-processing --edges normal --prefix none > "$dependency_tree"
+if rg -q '^aether-http-data-processor v' "$dependency_tree"; then
+    echo "ERROR: the transport-neutral data-processing codec depends on the HTTP adapter"
+    exit 1
+fi
+cargo tree -p aether-http-data-processor --edges normal --prefix none > "$dependency_tree"
+if ! rg -q '^aether-data-processing v' "$dependency_tree"; then
+    echo "ERROR: the HTTP processor adapter does not compose the shared wire codec"
     exit 1
 fi
 

@@ -8,6 +8,7 @@ crates/
   aether-domain        pure types and invariants
   aether-ports         external capability traits
   aether-application   commands, queries, policies, capability registry
+  aether-data-processing strict transport-neutral processor JSON codec
   aether-dataplane     physical SHM layout, slots, mmap I/O, snapshots
   aether-runtime       reusable service lifecycle and supervision primitives
   aether-rules         industry-neutral rule engine
@@ -21,6 +22,7 @@ extensions/
   postgres-history     optional HistorySink implementation
   mqtt-uplink          optional cloud uplink
   http-api             optional REST/WebSocket transport
+  http-data-processor  optional local/remote DataProcessor adapter
   linux-platform       Linux GPIO/CAN/device support
   python-transform     optional Python transform host
 
@@ -50,6 +52,9 @@ packs/
   building             building-automation assets
   factory              manufacturing assets
 
+integrations/
+  load-forecasting     opt-in request-driven legacy forecasting adapter
+
 ai/                    agent navigation, invariants, safety, runbooks, evals
 contracts/             machine-readable config/command/event/tool schemas
 tests/                 conformance, integration, scenario, and chaos tests
@@ -64,13 +69,50 @@ Storage is split by intent rather than database command vocabulary:
 | `LiveState` | Current point values | SHM or memory |
 | `LiveStateWriter` | Acquisition-owned point updates | SHM writer or memory |
 | `ConfigRepository` | Devices, mappings, and rules | file or SQLite |
-| `HistorySink` | Append/query historical samples | local SQLite or PostgreSQL |
+| `HistorySink` | Append historical samples | local SQLite or PostgreSQL |
+| `HistoryQuery` | Read bounded historical observation windows | local history service or embedded store |
 | `DurableOutbox` | Offline store-and-forward | local journal or SQLite |
 | `UplinkPublisher` | Transport delivery boundary | MQTT, HTTP, or custom cloud adapter |
 | `StateMirror` | Optional external live-state view | Redis |
 | `AuditSink` | Durable operation audit | local file/SQLite or PostgreSQL |
 
 One adapter may implement several ports, but no port exposes vendor commands.
+
+## Data-processing capabilities
+
+Aether Data Processing is a vertical slice through the existing stable layers,
+not a new dependency direction and not a mandatory seventh process:
+
+```text
+aether-domain::data_processing       task identity, processing/result values, quality, provenance
+aether-ports (data_processing/clock) HistoryQuery, CovariateSource, Clock, and DataProcessor ports
+aether-application::data_processing  data binding, frame assembly, policy, processor invocation, validation
+aether-data-processing               strict v1 JSON DTOs, codec, and canonical input digest
+extensions/sqlite-history-query      default read-only, task-scoped interval aggregation
+extensions/http-history-query        optional pre-aligned Last/Reject history transport
+extensions/http-data-processor       optional processor transport
+services/api                         opt-in v1 runtime composition and authenticated HTTP routes
+packs/<industry>/data-processing     declarative tasks, semantic bindings, units, schemas
+```
+
+Version 1 composes the application inside opt-in `aether-api` and isolates the
+Load-Forecasting implementation in a sidecar. It returns `DerivedData` directly
+over authenticated HTTP; there is no result cache, CLI/MCP binding, scheduler,
+or standalone Aether orchestration process. `aether-data-processor` is reserved
+as a possible future process name if shared orchestration later requires one.
+With no configured processor, the runtime does not advertise data-processing
+execution capabilities and acquisition, history, alarms, automation, API
+access, and uplink continue normally.
+
+Processors receive complete, bounded processing frames from the application.
+They cannot discover points by reading SQLite, query the historian directly,
+or attach to SHM. Returned values are expiring derived-data artifacts; they
+never become authoritative T/S state or bypass the control application. This
+application-level facility does not replace protocol decoding, the rule
+engine, history storage, alarms, or bulk ETL. See
+[Data Processing](../concepts/data-processing.md),
+[Data Processing Flow](../concepts/data-processing-flow.md), and
+[ADR-0009](../adr/0009-aether-data-processing.md).
 
 ## AI-native repository contract
 

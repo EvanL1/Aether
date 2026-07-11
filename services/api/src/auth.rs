@@ -8,7 +8,7 @@ use crate::models::{RefreshTokenInfo, TokenResponse, UserWithRole};
 
 // ── JWT Claims ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub user_id: i64,
     pub username: String,

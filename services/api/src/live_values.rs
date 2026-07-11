@@ -4,11 +4,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use aether_domain::PointKind;
+use aether_domain::{PointAddress, PointKind};
 use aether_ports::{PortError, PortErrorKind, PortResult};
 use aether_shm_bridge::{
     ChannelHealthManifest, ChannelHealthSample, ChannelPointManifest, ReconnectingSlotSource,
-    ShmChannelHealthReader, ShmClientConfig, SlotSnapshot, SlotSource,
+    ShmChannelHealthReader, ShmClientConfig, ShmLiveState, SlotSnapshot, SlotSource,
+    StaticSlotResolver,
 };
 use anyhow::Context;
 use sqlx::SqlitePool;
@@ -413,6 +414,50 @@ pub async fn build_gateway_value_source(
 
     Ok(Arc::new(ShmGatewayValueSource::new(
         slots, manifest, routing, health,
+    )))
+}
+
+/// Builds the read-only `LiveState` used by an enabled Data Processing route.
+///
+/// Only explicitly commissioned logical point addresses are resolved. The
+/// adapter receives no SHM writer and does not change the existing authority.
+pub async fn build_data_processing_live_state(
+    pool: &SqlitePool,
+    config: &GatewayConfig,
+    addresses: &[PointAddress],
+) -> anyhow::Result<Arc<ShmLiveState>> {
+    let manifest = Arc::new(load_channel_manifest(pool).await?);
+    let routing = load_gateway_routing(pool).await?;
+    let mut entries = Vec::with_capacity(addresses.len());
+    let mut commissioned_slots = std::collections::HashSet::new();
+    for address in addresses {
+        if address.kind().is_writable() {
+            anyhow::bail!("Data Processing live-state mapping targets a writable point");
+        }
+        let target = routing
+            .point(address.instance_id().get(), "M", address.point_id().get())
+            .with_context(|| format!("no enabled measurement route for {address:?}"))?;
+        if target.kind != address.kind() {
+            anyhow::bail!("commissioned logical point kind does not match its physical route");
+        }
+        let slot = manifest
+            .slot(target.channel_id, target.kind, target.point_id)
+            .with_context(|| format!("no SHM slot for commissioned point {address:?}"))?;
+        if !commissioned_slots.insert(slot) {
+            anyhow::bail!("multiple commissioned logical points resolve to one SHM slot");
+        }
+        entries.push((*address, slot));
+    }
+    let slots = Arc::new(ReconnectingSlotSource::new(
+        ShmClientConfig::new(&config.shm_path, manifest.layout_hash())
+            .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
+            .with_identity_check_interval(Duration::from_millis(
+                config.shm_identity_check_interval_ms,
+            )),
+    ));
+    Ok(Arc::new(ShmLiveState::new(
+        slots,
+        Arc::new(StaticSlotResolver::from_entries(entries)),
     )))
 }
 

@@ -14,11 +14,17 @@ path = "src/main.rs"
 common = { path = "../../libs/common", default-features = false, features = ["sqlite", "axum"] }
 aether-domain = { path = "../../crates/aether-domain" }
 aether-ports = { path = "../../crates/aether-ports" }
+aether-application = { path = "../../crates/aether-application" }
+aether-data-processing = { path = "../../crates/aether-data-processing" }
 aether-shm-bridge = { path = "../../extensions/shm-bridge" }
+aether-http-data-processor = { path = "../../extensions/http-data-processor" }
+aether-sqlite-history-query = { path = "../../extensions/sqlite-history-query" }
+aether-store-local = { path = "../../extensions/store-local", features = ["sqlite-audit"] }
 
 # Async runtime
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+async-trait = { workspace = true }
 
 # Web framework
 axum = { workspace = true, features = ["ws", "multipart"] }
@@ -30,6 +36,7 @@ tracing = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yml = { workspace = true }
 
 # Database
 sqlx = { workspace = true }

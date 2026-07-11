@@ -14,6 +14,16 @@ The kernel API and safe default site are industry-neutral. The compatibility
 runtime still embeds the legacy energy model catalog until pack loading is
 complete; those models are not commissioned by default.
 
+For Data Processing, `as_of` is an event-time frame bound. The current SQLite
+history has no ingestion/source epoch and artifact provenance has no
+training/availability cut, so historical backtests require frozen history and
+artifact sets; do not infer point-in-time safety from `as_of` or a digest.
+Persisted historian storage settings are saved intent and require
+reconnect/restart plus sentinel verification before they represent the active
+writer. Production direct-SQLite access additionally requires a dedicated
+read-only historian directory/identity for `aether-api`; the base
+`/app/data:rw` Compose mount is not that boundary.
+
 ## AI-native Architecture
 
 - [Canonical Agent Instructions](AGENTS.md): Architecture boundaries, safety rules, Rust conventions, and verification commands
@@ -23,11 +33,21 @@ complete; those models are not commissioned by default.
 - [ADR-0004](docs/adr/0004-canonical-service-names.md): Breaking canonical identities for the six isolated runtime services
 - [ADR-0006](docs/adr/0006-installation-and-commissioning.md): Fail-safe installation context, atomic configuration apply, and the boundary between setup and physical-device commissioning
 - [ADR-0007](docs/adr/0007-aether-core-and-ems-distribution.md): Staged separation of the Aether kernel and AetherEMS energy distribution without rewriting Git history
+- [ADR-0009](docs/adr/0009-aether-data-processing.md): Accepted industry-neutral task, processor direction, derived-data authority, opt-in API/sidecar composition, and reserved future runtime decision
 - [Target Repository Layout](docs/architecture/target-layout.md): Core crates, optional extensions, interfaces, and domain packs
 - [SHM Data Plane Crate](crates/aether-dataplane/README.md): Layout ownership, mmap validation, seqlock safety, and compatibility imports
+- [Data Processing Codec Crate](crates/aether-data-processing/README.md): Strict transport-neutral v1 JSON codec, DTO conversion, and RFC 8785 input digests
 - [Local Store Extension](extensions/store-local/README.md): Memory adapters and the crash-recoverable FileOutbox
+- [SQLite History Query Extension](extensions/sqlite-history-query/README.md): Default lazy read-only history adapter with task-scoped interval aggregation in one invocation-time SQLite snapshot, plus explicit bitemporal and active-writer limitations
+- [HTTP History Query Extension](extensions/http-history-query/README.md): Optional loopback adapter for an upstream pre-aligned Last/Reject cadence grid
+- [HTTP Data Processor Extension](extensions/http-data-processor/README.md): Optional bounded local/remote HTTP implementation of the DataProcessor port
+- [Data Processing Contract Schemas](contracts/data-processing/README.md): Strict Draft 2020-12 schemas for caller requests, complete frames, processor requests/results, derived data, and errors
+- [Energy Data Processing Assets](packs/energy/data-processing/README.md): Disabled load/PV task declarations, uncommissioned example binding, and v1 fixtures
+- [AI Component Catalog](ai/catalog.yaml): Machine-readable component ownership, paths, and narrow verification commands
 - [AI Invariants](ai/invariants.md): Source-of-truth, control safety, offline, and dependency invariants
 - [Capability Safety Policy](ai/safety-policy.yaml): Machine-readable risk and authorization policy
+- [Data Processing AI Eval Scenarios](ai/evals/data-processing.yaml): Permission, confirmation, audit, non-idempotency, untrusted-result, isolation, and no-control cases tied to deterministic Rust tests
+- [Add a Data Processor](ai/runbooks/add-data-processor.md): Deterministic procedure for typed tasks, processor isolation, conformance, AI metadata, and verification
 - [OceanClaw + nex-env IoT Safety Lab](docs/plans/2026-07-11-oceanclaw-nex-env-iot-safety-lab.md): Backlog proposal for using Aether as an isolated IoT agent-safety experiment and device-state oracle
 
 ## Domain Knowledge
@@ -36,6 +56,7 @@ complete; those models are not commissioned by default.
 - [Built-in Product Models](docs/domain/product-models.md): The 13 built-in product models, their hierarchy, and the meaning of every measurement and action point
 - [Control Strategies as Rules](docs/domain/control-strategies.md): Expressing SOC management, peak shaving, and demand control as executable rule flows
 - [Safe Operations for AI Agents](docs/domain/safe-operations.md): Which writes reach real devices, how write gating works, and the operating rules an AI agent must follow
+- [Power Forecasting](docs/domain/power-forecasting.md): Map AetherEMS load and PV data into the request-driven Load-Forecasting processor without creating a second data plane
 
 ## Concepts
 
@@ -44,6 +65,8 @@ complete; those models are not commissioned by default.
 - [Shared Memory](docs/concepts/shared-memory.md): The SHM data plane - slot layout, writer ownership, seqlock reads, generations, and the PointWatch event plane
 - [Rule Engine](docs/concepts/rule-engine.md): Dual-column rule storage, tick and event scheduling, execution, and hot reload
 - [Data Flow](docs/concepts/data-flow.md): SHM-native uplink and downlink paths end to end, with latency budgets and optional mirror boundaries
+- [Data Processing](docs/concepts/data-processing.md): The implemented cross-industry data-processing capability, its typed task boundary, data authority, and non-goals
+- [Data Processing Flow](docs/concepts/data-processing-flow.md): Interval-end data assembly, processor requests, result validation, direct v1 response, and control separation end to end
 
 ## Guides
 
@@ -52,10 +75,16 @@ complete; those models are not commissioned by default.
 - [Writing Rules](docs/guides/writing-rules.md): Author rules through the HTTP API or the visual flow editor
 - [Connect AI Assistants](docs/guides/ai-assistants.md): Point Claude or any MCP client at aether mcp, and choose between read-only and write access
 - [Deployment](docs/guides/deployment.md): Run with Docker Compose or build a self-contained installer for edge devices
+- [Data Processors](docs/guides/data-processors.md): Declare data-processing tasks in domain packs and connect request-driven local or remote processors
+- [Data Processing Runtime Template](packs/energy/data-processing/runtime.example.yaml): Synthetic strict composition template for SQLite history, snapshot covariates, audit, and the Load-Forecasting HTTP processor
+- [Load-Forecasting Processor Integration](integrations/load-forecasting/README.md): Add the request-driven /v1/process boundary to the existing Edge-Platform without reverse data reads
+- [Load-Forecasting Deployment](integrations/load-forecasting/deploy/README.md): Commission the digest-pinned, authenticated processor with the production Compose override or an isolated systemd unit
 
 ## Reference
 
 - [CLI Reference](docs/reference/cli.md): Every aether command - services, sync, doctor, channels, rules, and more
 - [MCP Tools Reference](docs/reference/mcp-tools.md): All MCP tools grouped by domain, with parameters and write-safety markers
 - [Configuration Reference](docs/reference/configuration.md): YAML configuration schema, the sync pipeline, and environment variables
-- [HTTP API](docs/reference/http-api.md): Response envelope conventions, authentication, and service endpoint overview
+- [HTTP API](docs/reference/http-api.md): Response envelopes, authentication, and the opt-in `/api/v1/data-processing/*` application routes
+- [Data Processing Contracts](docs/reference/data-processing-contracts.md): Implemented v1 contracts for processing frames, requests, derived results, validation, and failure semantics
+- [Data Processing Implementation Record](docs/plans/2026-07-11-aether-data-processing.md): Documentation-first implementation sequence, landed baseline, and remaining production commissioning/shadow-cutover gates

@@ -1,7 +1,7 @@
 ---
 title: HTTP API
 description: Response envelope conventions, authentication, and service endpoint overview
-updated: 2026-07-10
+updated: 2026-07-11
 ---
 
 # HTTP API
@@ -83,10 +83,11 @@ code carries the primary signal; the body adds machine-readable detail.
 ## Authentication
 
 The API gateway enforces JWT authentication through the `require_jwt`
-middleware (`services/api/src/middleware_auth.rs`). It accepts a
-Bearer token in the `Authorization` header, with `?token=...` as a
-query-string fallback because browsers cannot set custom headers on WebSocket
-upgrades. Missing or invalid tokens get `401 Unauthorized`.
+middleware (`services/api/src/middleware_auth.rs`). REST requests accept a
+Bearer token only in the `Authorization` header; query-string tokens are
+rejected. The `?token=...` fallback is limited to an actual WebSocket upgrade,
+because browser WebSocket clients cannot set custom headers. Missing or invalid
+tokens get `401 Unauthorized`.
 
 Coverage (wired in `build_router` in `services/api/src/main.rs`):
 
@@ -175,6 +176,7 @@ Routes from `services/io/src/api/routes.rs`.
 | GET | `/api/channels/{channel_id}/{telemetry_type}/{point_id}` | Point info with current value |
 | GET, POST | `/api/admin/logs/level` | Read / set runtime log level |
 | GET | `/api/admin/logs/files`, `/api/admin/logs/view` | List / view log files |
+
 | GET, POST | `/api/templates` | List / create channel templates |
 | POST | `/api/templates/from-channel/{channel_id}` | Create template from an existing channel |
 | GET, PUT, DELETE | `/api/templates/{id}` | Template detail / update / delete |
@@ -286,8 +288,20 @@ Routes from `services/api/src/main.rs`. Everything below except
 | POST | `/api/v1/config/restart-services` | Disabled (`501`); use the local deployment-aware CLI |
 | POST | `/api/v1/config/upgrade`, `/upgrade/abort` | Disabled (`501`); remote and in-place runtime upgrades are not supported |
 | GET | `/api/v1/config/upgrade/status` | Read the compatibility status response only; it does not expose a supported upgrade workflow |
+| GET | `/api/v1/data-processing/tasks` | List commissioned task/binding/processor policy summaries (Viewer, Engineer, Admin; mounted only when enabled) |
+| GET | `/api/v1/data-processing/processors/health` | Read commissioned processor health (Viewer, Engineer, Admin) |
+| POST | `/api/v1/data-processing/process` | Assemble and process a strict task request (Engineer or Admin; non-idempotent, required audit) |
 | GET, POST | `/api/admin/logs/level` | Read / set runtime log level |
 | GET | `/api/admin/logs/files`, `/api/admin/logs/view` | List / view log files |
+
+The three Data Processing routes are absent when
+`AETHER_DATA_PROCESSING_ENABLED` is false. `POST .../process` accepts the strict
+application-facing task request—never a complete frame, endpoint, or artifact
+path—and returns `aether.derived-data.v1` with media type
+`application/vnd.aether.data-processing+json;version=1`. An optional
+`x-request-id` supplies correlation; `x-aether-confirmed: true` satisfies an
+explicit confirmation requirement. The operation is non-idempotent and fails
+closed when its required durable audit cannot be recorded.
 
 ### aether-alarm (port 6007)
 

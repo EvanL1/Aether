@@ -16,6 +16,8 @@ pub struct GatewayConfig {
     pub allow_public_registration: bool,
     pub network_config_dir: String,
     pub data_fetch_interval_secs: u64,
+    pub data_processing_enabled: bool,
+    pub data_processing_config_path: String,
 }
 
 impl Default for GatewayConfig {
@@ -71,6 +73,11 @@ impl Default for GatewayConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1),
+            data_processing_enabled: env::var("AETHER_DATA_PROCESSING_ENABLED")
+                .ok()
+                .is_some_and(|value| explicit_opt_in(&value)),
+            data_processing_config_path: env::var("AETHER_DATA_PROCESSING_CONFIG")
+                .unwrap_or_else(|_| "/app/data/config/data-processing/runtime.yaml".to_string()),
         }
     }
 }

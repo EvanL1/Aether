@@ -16,9 +16,21 @@ Run the fail-safe distribution proof from the repository root:
 ```bash
 cargo run -p aether-example-energy-gateway
 cargo test -p aether-example-energy-gateway --test composition_contract
+cargo test -p aether-example-energy-gateway --test data_processing_composition
 ```
 
 This validates and reports the bundled energy capabilities but does not start
 the six production services, contact a field device, or enable a control rule.
 The future standalone AetherEMS repository will consume a released Aether
 version according to [ADR-0007](../../docs/adr/0007-aether-core-and-ems-distribution.md).
+
+Load and PV forecasting are the first Aether Data Processing tasks in this
+pack. Their complete disabled-by-default declarations, synthetic binding, and
+contract fixtures live under [data-processing](data-processing/README.md).
+Their semantic inputs, request-driven processor boundary, and migration from
+the existing service are documented in
+[Power Forecasting](../../docs/domain/power-forecasting.md). Installing this
+pack never starts a model or contacts a remote processor by itself. The
+opt-in implementations are the bounded
+[HTTP adapter](../../extensions/http-data-processor/README.md) and
+[Load-Forecasting processor](../../integrations/load-forecasting/README.md).

@@ -82,10 +82,16 @@ dependencies = [
 name = "aether-api"
 version = "0.5.0"
 dependencies = [
+ "aether-application",
+ "aether-data-processing",
  "aether-domain",
+ "aether-http-data-processor",
  "aether-ports",
  "aether-shm-bridge",
+ "aether-sqlite-history-query",
+ "aether-store-local",
  "anyhow",
+ "async-trait",
  "axum",
  "bcrypt",
  "bytes",
@@ -97,6 +103,7 @@ dependencies = [
  "md-5",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "sqlx",
  "tokio",
  "tokio-util",
@@ -112,6 +119,7 @@ dependencies = [
 name = "aether-application"
 version = "0.5.0"
 dependencies = [
+ "aether-data-processing",
  "aether-domain",
  "aether-ports",
  "aether-store-local",
@@ -120,6 +128,7 @@ dependencies = [
  "serde_yaml_ng",
  "thiserror 2.0.17",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -203,6 +212,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-data-processing"
+version = "0.5.0"
+dependencies = [
+ "aether-domain",
+ "chrono",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha2",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "aether-dataplane"
 version = "0.5.0"
 dependencies = [
@@ -235,10 +257,13 @@ version = "0.5.0"
 dependencies = [
  "aether-edge-sdk",
  "aether-example-minimal-gateway",
+ "aether-store-local",
+ "async-trait",
  "serde",
  "serde_json",
  "serde_yaml_ng",
  "thiserror 2.0.17",
+ "tokio",
 ]
 
 [[package]]
@@ -275,6 +300,37 @@ dependencies = [
  "urlencoding",
  "utoipa",
  "utoipa-swagger-ui",
+]
+
+[[package]]
+name = "aether-http-data-processor"
+version = "0.5.0"
+dependencies = [
+ "aether-data-processing",
+ "aether-domain",
+ "aether-ports",
+ "async-trait",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
+name = "aether-http-history-query"
+version = "0.5.0"
+dependencies = [
+ "aether-domain",
+ "aether-ports",
+ "async-trait",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -518,6 +574,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-sqlite-history-query"
+version = "0.5.0"
+dependencies = [
+ "aether-domain",
+ "aether-ports",
+ "aether-testkit",
+ "async-trait",
+ "chrono",
+ "sqlx",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "aether-store-local"
 version = "0.5.0"
 dependencies = [
@@ -526,6 +596,8 @@ dependencies = [
  "aether-testkit",
  "async-trait",
  "fs2",
+ "serde",
+ "serde_json",
  "sqlx",
  "tempfile",
  "tokio",
@@ -537,6 +609,8 @@ version = "0.5.0"
 dependencies = [
  "aether-domain",
  "aether-ports",
+ "async-trait",
+ "tokio",
 ]
 
 [[package]]
@@ -4004,6 +4078,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a50f4cf475b65d88e057964e0e9bb1f0aa9bbb2036dc65c64596b42932536984"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4179,6 +4259,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_json_canonicalizer"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe52319a927259afbfa5180c5157cd8167edfd3e8c254f9558c7fef44c5649f2"
+dependencies = [
+ "ryu-js",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5427,6 +5518,7 @@ dependencies = [
  "getrandom 0.3.4",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

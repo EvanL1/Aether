@@ -3,9 +3,18 @@
 Small, object-safe capability interfaces for Aether edge extensions.
 
 The crate separates authoritative live reads, acquisition-owned writes,
-device command dispatch, audit, history, mirroring, durable outbox, and uplink
-publishing. It deliberately does not expose a generic database or cache API.
-Hosts choose concrete adapters at the composition boundary.
+device command dispatch, audit, history, mirroring, durable outbox, uplink
+publishing, and request-driven data processing. `HistoryQuery` and
+`CovariateSource` accept bounded logical windows and return source provenance;
+`DataProcessor` receives a complete `DataProcessingRequest` and has no callback
+into Aether data sources. It deliberately does not expose a generic database,
+cache, model, or script-runner API. Hosts choose concrete adapters at the
+composition boundary.
+
+`HistoryQuery` bounds event time but does not implicitly promise bitemporal or
+source-epoch history; an implementation must declare stronger point-in-time
+semantics explicitly. Likewise, artifact chronology is not a history-port
+responsibility.
 
 Errors carry recovery semantics so callers can distinguish unavailable,
 transient, rejected, invalid-data, and permanent failures.

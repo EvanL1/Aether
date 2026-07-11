@@ -77,6 +77,7 @@ pub(crate) async fn app_state_with_public_registration(
         db: database,
         config: Arc::new(config),
         ws_hub,
+        data_processing: None,
         refresh_tokens: DashMap::new(),
     })
 }

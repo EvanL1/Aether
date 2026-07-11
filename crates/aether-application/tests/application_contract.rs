@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use aether_application::{
-    Actor, ApplicationError, ControlApplication, EdgeApplication, OperationKind, RequestContext,
-    RiskLevel, SafetyPolicy, capability_catalog,
+    Actor, ApplicationError, AuditPolicy, ControlApplication, EdgeApplication, OperationKind,
+    RequestContext, RiskLevel, SafetyPolicy, capability_catalog,
 };
 use aether_domain::{
     CommandId, ControlCommand, InstanceId, PointAddress, PointId, PointKind, PointQuality,
@@ -124,6 +124,7 @@ fn capability_catalog_is_machine_discoverable_and_classifies_control_as_high_ris
     assert_eq!(write.risk(), RiskLevel::High);
     assert_eq!(write.required_permission(), "device.control");
     assert!(write.requires_confirmation());
+    assert_eq!(write.audit_policy(), AuditPolicy::Required);
     assert!(!write.is_idempotent());
 }
 

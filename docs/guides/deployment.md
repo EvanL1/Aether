@@ -25,12 +25,15 @@ docker compose ps
 The default Compose application starts only the six Rust services, all with
 `network_mode: host`. The web client, Redis, and TimescaleDB start only when
 their explicit `frontend`, `redis`, and `postgres-storage` profiles are
-selected:
+selected. The base file exposes the forecast sidecar only through the mutable
+`data-processing-dev` profile; production requires the explicit override shown
+below.
 
 | Container | Image | Role |
 |-----------|-------|------|
 | aether-redis | redis:8-alpine | Optional non-authoritative state mirror infrastructure (`redis` profile) |
 | aether-timescaledb | timescale/timescaledb:2.25.2-pg17 | Optional PostgreSQL history backend (`postgres-storage` profile) |
+| aether-load-forecasting-processor | operator-supplied, digest-pinned image | Optional request-driven processor (`data-processing` profile) |
 | aether-io | aetherems:latest | Communication service (privileged, mounts `/dev` for field buses) |
 | aether-automation | aetherems:latest | Model service and rule engine |
 | aether-history | aetherems:latest | SHM sampler with embedded SQLite history by default |
@@ -42,6 +45,77 @@ selected:
 Start the optional browser client with
 `docker compose --profile frontend up -d`; it is not part of the edge-kernel
 acceptance path.
+
+The production forecast profile requires an immutable image built from the
+existing Load-Forecasting service plus Aether's adapter, a commissioned
+artifact bundle, a matching bearer token, and a validated runtime YAML under
+`${AETHER_BASE_PATH}/config/data-processing/runtime.yaml`:
+
+Copy the repository's synthetic
+[`runtime.example.yaml`](../../packs/energy/data-processing/runtime.example.yaml)
+and
+[`covariates.example.json`](../../packs/energy/data-processing/covariates.example.json)
+into that deployment-owned directory, replace every logical/physical mapping,
+artifact digest, and covariate row, and validate them against the site database.
+The examples are not production values.
+
+```bash
+export AETHER_LOAD_FORECASTING_IMAGE=registry.example/load-forecasting@sha256:<digest>
+export AETHER_LOAD_FORECASTING_BEARER_TOKEN='<unique secret>'
+export AETHER_LOAD_FORECASTING_ARTIFACT_BUNDLES='<commissioned JSON array>'
+integrations/load-forecasting/deploy/validate-production-env.sh
+docker compose \
+  -f docker-compose.yml \
+  -f integrations/load-forecasting/deploy/docker-compose.data-processing.yaml \
+  --profile data-processing \
+  up -d aether-load-forecasting-processor aether-api
+```
+
+The preflight is mandatory for this documented production path. It rejects a
+non-`@sha256` image reference, weak or malformed token, out-of-range
+concurrency, and non-strict artifact-bundle JSON before Compose evaluates the
+override.
+
+Historian authority requires a separate operational check. A storage
+`PUT /hisApi/storage` saves settings but does not reconnect the active writer.
+Keep Data Processing disabled across a storage change, reconnect or restart
+`aether-history`, verify its active SQLite backend and a commissioned sentinel
+series, then restart `aether-api` with runtime `history.path` matching the
+applied backend. The persisted `history_config.storage_*` rows alone do not
+prove the live write target.
+
+Direct SQLite history also needs a filesystem boundary. The API must receive
+the historian database, WAL, and SHM through a dedicated read-only directory
+mount (or an independently permissioned read-only OS account/ACL); its own
+`aether.db` and audit writes stay on a separate writable path. The base Compose
+currently mounts the whole `/app/data` directory read-write into `aether-api`,
+so the documented production Data Processing route is blocked until a site
+override provides and verifies that separation. SQLite `mode=ro` and
+`query_only=ON` alone are not sufficient containment.
+
+The `/api/v1/data-processing/process` call is non-idempotent and writes a
+mandatory audit record even when work is rejected. The current API does not
+provide an actor/IP request-rate limiter or an audit retention quota. A
+production ingress must therefore enforce authenticated actor and source-IP
+rates plus an in-flight ceiling, while operations monitor
+`command_audit_events` growth and apply a retention/export policy that
+preserves required evidence. Production enablement is blocked without those
+controls; the per-route processor semaphore alone does not bound rejected-call
+audit writes.
+
+It binds to loopback and receives no Aether data-directory, configuration,
+device, history-database, or SHM mount. The application sends a complete,
+bounded `ProcessingFrame` over the processor port. See
+[`../../integrations/load-forecasting/deploy/README.md`](../../integrations/load-forecasting/deploy/README.md)
+for the standalone systemd unit and commissioning requirements.
+
+The Compose sidecar joins only the dedicated `data-processing-local` network,
+which is declared `internal: true`; together with host-loopback publication,
+this mechanically blocks container external egress and limits inbound access.
+Native/systemd deployment still requires a host firewall or equivalent egress
+policy. The examples also leave CPU, memory, and PID quotas
+deployment-specific; set measured cgroup/systemd limits from a real artifact
+benchmark so processor load cannot starve deterministic services.
 
 The six Rust services share one `aetherems:latest` image, each started with
 its own command. The `aether-apps:latest` image must be pre-built or loaded

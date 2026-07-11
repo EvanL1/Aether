@@ -7,6 +7,7 @@ rules are defined in:
 - [ADR-0001: AI-native edge kernel](docs/adr/0001-ai-native-edge-kernel.md)
 - [ADR-0003: Multi-process SHM and event plane](docs/adr/0003-multi-process-shm-event-plane.md)
 - [ADR-0004: Canonical service names](docs/adr/0004-canonical-service-names.md)
+- [ADR-0009: Aether Data Processing](docs/adr/0009-aether-data-processing.md)
 - [Target repository layout](docs/architecture/target-layout.md)
 - [AI invariants](ai/invariants.md)
 - [Capability safety policy](ai/safety-policy.yaml)
@@ -45,6 +46,39 @@ compatibility mirror while remaining legacy aether-io/aether-automation paths ar
 
 Optional adapters may add Redis state mirroring, PostgreSQL history, MQTT
 uplink, or HTTP APIs. They do not change the source-of-truth rules.
+
+## Data-processing capability
+
+[Aether Data Processing](docs/concepts/data-processing.md) is the implemented
+industry-neutral boundary for assembling governed IoT data and invoking a
+local or remote processor. The application owns history and live-state
+selection, semantic bindings, quality policy, authorization, and result
+validation. A processor receives a complete bounded processing frame; it never
+reaches back into SHM, the history database, or an industry pack.
+
+The opt-in v1 composition lives in `aether-api`, reads raw history through a
+read-only SQLite adapter, and returns `DerivedData` through authenticated
+`/api/v1/data-processing/*` routes. The Load-Forecasting implementation remains
+an isolated sidecar. CLI/MCP bindings, result caching, scheduling, and a
+standalone Aether orchestration process are not implemented. Current history
+and SHM adapters also do not preserve device-origin sample quality end to end;
+they enforce freshness, gaps, missingness, constraints, and provenance. The
+SQLite history is invocation-time consistent but not bitemporal: rows have no
+ingestion/source epoch, and model provenance has no training/availability cut.
+Therefore historical `as_of` alone is not a leakage-safe backtest boundary.
+Production direct-history composition also requires a dedicated read-only
+historian directory/identity for the API; SQLite read-only mode over the base
+shared writable data mount is not an authority boundary.
+
+Processing results are expiring derived-data artifacts, not live point state
+and not device commands. They are never written into the IO-owned T/S segment,
+and a forecast, aggregate, estimate, or classification can influence equipment
+only through a separate automation/control use case. The domain contracts live
+in `aether-domain`, the ports and orchestration live in `aether-ports` and
+`aether-application`, and the strict v1 wire codec lives in
+`aether-data-processing`. Concrete processors and HTTP transport remain
+optional; `aether-data-processor` is only a reserved future process name. The
+default six-service runtime continues to operate when no processor is installed.
 
 ## Dependency Rule
 

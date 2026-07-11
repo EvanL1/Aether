@@ -24,8 +24,8 @@ services:
       "--unixsocketperm", "777"
     ]
     environment:
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - NO_PROXY=*
+      - no_proxy=*
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -47,8 +47,8 @@ services:
       # Empty is intentionally invalid: opting into this profile requires an
       # operator-provided secret instead of a public default password.
       - POSTGRES_PASSWORD=${TIMESCALEDB_PASSWORD:-}
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - NO_PROXY=*
+      - no_proxy=*
     volumes:
       - ${AETHER_TIMESCALE_DATA_PATH:-./data/timescaledb/data}:/var/lib/postgresql/data
     command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
@@ -58,6 +58,61 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Optional request-driven load forecasting processor. The image is produced
+  # from the existing Load-Forecasting service after installing the adapter in
+  # integrations/load-forecasting. It receives complete processing frames and
+  # deliberately has no Aether data/config/SHM mounts.
+  aether-load-forecasting-processor:
+    # Mutable local image is development-only. Production uses the explicit
+    # deploy/docker-compose.data-processing.yaml override with a required digest.
+    profiles: ["data-processing-dev"]
+    image: ${AETHER_LOAD_FORECASTING_IMAGE:-aether-load-forecasting-processor:local}
+    container_name: aether-load-forecasting-processor
+    ports:
+      - "127.0.0.1:${AETHER_LOAD_FORECASTING_PORT:-8989}:8989"
+    networks:
+      - data-processing-local
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    labels:
+      - "aetherems.role=data-processor"
+      - "aetherems.description=Optional request-driven load forecasting processor"
+    environment:
+      # Bind inside the isolated container; the host publication remains loopback-only.
+      - API_HOST=0.0.0.0
+      - API_PORT=8989
+      - AETHER_LOAD_FORECASTING_REQUIRE_AUTH=${AETHER_LOAD_FORECASTING_REQUIRE_AUTH:-false}
+      - AETHER_LOAD_FORECASTING_BEARER_TOKEN=${AETHER_LOAD_FORECASTING_BEARER_TOKEN:-}
+      - AETHER_LOAD_FORECASTING_MAX_CONCURRENCY=${AETHER_LOAD_FORECASTING_MAX_CONCURRENCY:-1}
+      - AETHER_LOAD_FORECASTING_ARTIFACT_BUNDLES=${AETHER_LOAD_FORECASTING_ARTIFACT_BUNDLES:-}
+      - NO_PROXY=*
+      - no_proxy=*
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          body = json.load(urllib.request.urlopen("http://127.0.0.1:8989/v1/health", timeout=2));
+          raise SystemExit(0 if body.get("status") == "ok" else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # Communication service with full hardware access (Linux production)
   aether-io:
@@ -84,8 +139,8 @@ services:
       - ENABLE_SHARED_MEMORY=${ENABLE_SHARED_MEMORY:-true}
       - AETHER_M2C_SOCKET=/shm/rtdb/aether-m2c.sock
       - AETHER_AUTOMATION_POINT_WATCH_SOCKET=/shm/rtdb/aether-point-watch-automation.sock
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - NO_PROXY=*
+      - no_proxy=*
     logging:
       driver: json-file
       options:
@@ -111,8 +166,8 @@ services:
       - ENABLE_SHARED_MEMORY=${ENABLE_SHARED_MEMORY:-true}
       - AETHER_M2C_SOCKET=/shm/rtdb/aether-m2c.sock
       - AETHER_AUTOMATION_POINT_WATCH_SOCKET=/shm/rtdb/aether-point-watch-automation.sock
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - NO_PROXY=*
+      - no_proxy=*
     volumes:
       - ${AETHER_BASE_PATH:-./data}/config:/app/config:ro
       - ${AETHER_BASE_PATH:-./data}:/app/data:rw
@@ -132,6 +187,7 @@ services:
     container_name: aether-history
     command: ["aether-history"]
     network_mode: host
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       - SERVICE_NAME=aether-history
       - API_PORT=6004
@@ -139,8 +195,8 @@ services:
       - AETHER_DB_PATH=/app/data/aether.db
       - AETHER_HISTORY_DB_PATH=/app/data/aether-history.db
       - AETHER_LOG_DIR=/app/logs
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - NO_PROXY=*
+      - no_proxy=*
     volumes:
       - ${AETHER_BASE_PATH:-./data}:/app/data:rw
       - ${AETHER_LOG_PATH:-./logs}:/app/logs
@@ -172,8 +228,11 @@ services:
       - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
       - AETHER_LOG_DIR=/app/logs
       - NETWORK_CONFIG_DIR=/etc/systemd/network
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - AETHER_DATA_PROCESSING_ENABLED=${AETHER_DATA_PROCESSING_ENABLED:-false}
+      - AETHER_DATA_PROCESSING_CONFIG=/app/data/config/data-processing/runtime.yaml
+      - AETHER_LOAD_FORECASTING_BEARER_TOKEN=${AETHER_LOAD_FORECASTING_BEARER_TOKEN:-}
+      - NO_PROXY=*
+      - no_proxy=*
     volumes:
       - ${AETHER_BASE_PATH:-./data}:/app/data:rw
       - ${AETHER_LOG_PATH:-./logs}:/app/logs
@@ -202,8 +261,8 @@ services:
       - AETHER_UPLINK_OUTBOX_CAPACITY=${AETHER_UPLINK_OUTBOX_CAPACITY:-10000}
       - AETHER_UPLINK_CONTROL_TOKEN=${AETHER_UPLINK_CONTROL_TOKEN:?AETHER_UPLINK_CONTROL_TOKEN must be set; generate at least 32 random bytes}
       - DEVICE_SN=${DEVICE_SN:-}
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - NO_PROXY=*
+      - no_proxy=*
       # CERT_DIR 默认 /app/config/cert，宿主机通过下方 volume 挂载证书目录
     volumes:
       - ${AETHER_BASE_PATH:-./data}:/app/data:rw
@@ -231,8 +290,8 @@ services:
       - AETHER_LOG_DIR=/app/logs
       - AETHER_API_URL=${AETHER_API_URL:-http://127.0.0.1:6005}
       - AETHER_UPLINK_URL=${AETHER_UPLINK_URL:-http://127.0.0.1:6006}
-      - NO_PROXY="*"
-      - no_proxy="*"
+      - NO_PROXY=*
+      - no_proxy=*
     volumes:
       - ${AETHER_BASE_PATH:-./data}:/app/data:rw
       - ${AETHER_LOG_PATH:-./logs}:/app/logs
@@ -267,6 +326,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+networks:
+  # The local processor receives requests through a host-loopback published
+  # port but has no default route for outbound frame exfiltration.
+  data-processing-local:
+    internal: true
 
 volumes:
   redis-data:

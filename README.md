@@ -52,6 +52,7 @@ changing the application boundary.
 |---|---|---|
 | **Connect** | Acquire one device reliably | Protocol adapter + `aether-io` + authoritative SHM |
 | **Understand** | Give raw points stable meaning and history | Instance model + alarms + embedded history |
+| **Process** | Turn governed IoT windows into validated derived data | Aether Data Processing + typed tasks + optional processors |
 | **Automate** | Run deterministic behavior offline | Local rules + `aether-automation` |
 | **Assist** | Let agents inspect state and retrieve operational knowledge | Read-only MCP tools/resources + `llms.txt` |
 | **Act** | Allow bounded physical actions | Typed commands + authentication + confirmation + audit |
@@ -81,13 +82,14 @@ cargo run -p aether-example-energy-gateway
 Expected output:
 
 ```text
-Aether minimal gateway ready: 2 capabilities, no external services
-AetherEMS ready: pack=energy, capabilities=7, example_channels=8, commissioned=0
+Aether minimal gateway ready: 5 capabilities, no external services
+AetherEMS ready: pack=energy, capabilities=7, processing_tasks=2, example_channels=8, commissioned=0
 ```
 
 The first composition proves the public SDK has no energy dependency. The
 second proves that AetherEMS is assembled from the same kernel by adding the
-energy manifest, example models, and fail-closed commissioning policy.
+energy manifest, example models, disabled load/PV data-processing tasks, and
+fail-closed commissioning policy.
 
 ## What AI-native means in Aether
 
@@ -108,6 +110,13 @@ gateway:
   agent, model, network, or cloud disappears.
 - **Industry knowledge is composable.** Domain packs teach agents and the
   runtime about an industry without adding domain dependencies to the kernel.
+- **Data processing is governed.** Optional local or remote processors receive
+  complete, bounded frames; they cannot reverse-read Aether state or turn a
+  derived result into a device command. The landed v1 application surface is
+  authenticated HTTP; Data Processing CLI/MCP bindings remain future work, and
+  every non-idempotent process invocation requires durable audit. Historical
+  `as_of` is event-time only; point-in-time model evaluation needs frozen
+  history/source epochs and an artifact set frozen at the evaluation cut.
 
 The contracts are versioned with the code:
 
@@ -117,6 +126,7 @@ The contracts are versioned with the code:
 | [`ai/catalog.yaml`](ai/catalog.yaml) | Machine-readable component and verification catalog |
 | [`ai/invariants.md`](ai/invariants.md) | Non-negotiable runtime and safety invariants |
 | [`ai/safety-policy.yaml`](ai/safety-policy.yaml) | Capability risk, permission, confirmation, and audit policy |
+| [`contracts/data-processing`](contracts/data-processing/README.md) | Strict v1 caller, frame, processor, result, derived-data, and error schemas |
 | [`AGENTS.md`](AGENTS.md) | Canonical rules for coding agents working in the repository |
 | [`ai/evals`](ai/evals) | Evaluation entry point for agent behavior and architectural conformance |
 
@@ -136,14 +146,14 @@ typed capability + request context
         ├── required permission
         ├── confirmation policy
         ├── idempotency contract
-        └── mandatory audit policy
+        └── typed audit policy
         │
         ▼
 application command/query API
         │
-        ├── deny ──► durable audit
+        ├── deny ──► audit when required
         │
-        └── allow ─► routing + safety validation ─► SHM/UDS ─► device driver
+        └── allow ─► apply audit policy + safety validation ─► SHM/UDS ─► device driver
 ```
 
 For example, the machine-readable policy declares real device control as a
@@ -161,6 +171,10 @@ device.write_point:
 
 This metadata is enforced by the application boundary for external device
 actions; it is not documentation attached to an unchecked driver call.
+Capabilities whose `AuditPolicy` is `Required`, including processing and
+device writes, fail closed when the durable audit sink is unavailable.
+Read-only point, task, and health discovery use `NotRequired` and do not create
+an audit obligation.
 
 ## Connect an AI client
 
@@ -268,12 +282,13 @@ domain <- ports <- application <- runtime/interfaces
 
 | Layer | Responsibility |
 |---|---|
-| `aether-domain` | Industry-neutral point, identity, quality, and command types |
+| `aether-domain` | Industry-neutral point, identity, quality, command, and data-processing types |
 | `aether-dataplane` | Database-free SHM layout, atomic slots, mmap I/O, snapshots |
-| `aether-ports` | Capabilities such as `LiveState`, `HistorySink`, and `StateMirror` |
-| `aether-application` | Commands, queries, permissions, confirmation, and audit |
+| `aether-ports` | Capabilities such as `LiveState`, `HistoryQuery`, `DataProcessor`, and `StateMirror` |
+| `aether-application` | Commands, queries, governed frame assembly, permissions, confirmation, and audit |
+| `aether-data-processing` | Strict transport-neutral v1 processor codec and canonical input digest |
 | `aether-edge-sdk` (`aether_sdk`) | Stable builder and public facade |
-| `extensions/*` | Local, SHM, Redis, PostgreSQL, and platform adapters |
+| `extensions/*` | Local, SHM, HTTP processor, Redis, PostgreSQL, and platform adapters |
 | `packs/*` | Declarative industry knowledge; energy is the first official pack |
 
 The default Cargo members and edge composition do not require Redis or
@@ -293,6 +308,9 @@ bounds, reconnect semantics, and hardware behavior.
 
 ```text
 extensions/store-local       default embedded state, audit, and outbox
+extensions/sqlite-history-query default read-only Data Processing history query
+extensions/http-history-query optional pre-aligned Last/Reject history query
+extensions/http-data-processor optional bounded DataProcessor transport
 extensions/redis-bridge      optional non-authoritative state mirror
 extensions/postgres-history  optional external history sink
 ```
@@ -336,6 +354,8 @@ runtime, MCP server, or either composition example.
 ```text
 crates/       stable industry-neutral kernel and SDK
 extensions/   optional storage, SHM, and platform adapters
+integrations/ optional adapters for independently maintained external services
+contracts/    machine-readable transport and capability schemas
 services/     six production process-isolation boundaries
 tools/        Aether CLI/MCP launcher and simulator
 examples/     runnable Aether and AetherEMS compositions
