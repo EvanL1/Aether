@@ -44,12 +44,13 @@ describe('synthesizeFrontmatter', () => {
   });
 
   it('truncates an overlong description with an ellipsis', () => {
-    const longSentence = 'x'.repeat(200);
+    const longSentence = 'word '.repeat(50).trim();
     const content = `# Title\n\n${longSentence}\n`;
     const out = synthesizeFrontmatter(content, '2026-07-10');
     const descLine = out.split('\n').find((l) => l.startsWith('description:'));
     expect(descLine.length).toBeLessThan(180);
     expect(descLine).toContain('…"');
+    expect(descLine).not.toContain(' wor…');
   });
 
   it('falls back to "Untitled" when there is no heading', () => {

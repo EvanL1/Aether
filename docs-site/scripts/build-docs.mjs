@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DOCS_SITE_ROOT = path.resolve(__dirname, '..');
 const CONTENT_DIR = path.join(DOCS_SITE_ROOT, 'src', 'content', 'docs');
 const DIST_DIR = path.join(DOCS_SITE_ROOT, 'dist');
-const DEFAULT_PUBLIC_BASE_URL = 'https://docs.aether-edge.workers.dev';
+const DEFAULT_PUBLIC_BASE_URL = 'https://docs.aetheriot.workers.dev';
 
 export function slugToOutputRelPath(slug) {
   return slug === '' ? 'index.md' : `${slug}.md`;
@@ -19,6 +19,12 @@ export function assertFilesFound(files) {
     throw new Error(
       'build-docs: no markdown files found under src/content/docs/ — did you run npm run sync?'
     );
+  }
+}
+
+export function assertHtmlBuildPresent(found) {
+  if (!found) {
+    throw new Error('build-docs: HTML build is missing — run astro build before emitting agent docs');
   }
 }
 
@@ -78,19 +84,59 @@ export function renderDocument(source) {
 
 export function renderLlmsIndex(documents, publicBaseUrl) {
   const baseUrl = publicBaseUrl.replace(/\/$/, '');
-  const entries = documents
-    .map(({ slug, title, description }) => {
-      const url = slug === '' ? `${baseUrl}/` : `${baseUrl}/${slug}`;
-      return `- [${title}](${url})${description ? `: ${description}` : ''}`;
-    })
-    .join('\n');
+  const sections = [
+    ['Start Here', ({ slug }) => slug === 'agent-quickstart' || slug === 'guides/getting-started'],
+    ['Concepts', ({ slug }) => slug.startsWith('concepts/')],
+    ['Guides', ({ slug }) => slug.startsWith('guides/')],
+    ['Reference', ({ slug }) => slug.startsWith('reference/')],
+    ['SDK Crates', ({ slug }) => slug.startsWith('crates/')],
+    ['Extensions', ({ slug }) => slug.startsWith('extensions/')],
+    ['Security', ({ slug }) => slug.startsWith('security/')],
+  ];
+  const remaining = documents.filter(({ slug }) => slug !== '');
+  const renderedSections = [];
+
+  for (const [label, matches] of sections) {
+    const matched = remaining.filter(matches);
+    if (matched.length === 0) continue;
+    renderedSections.push(`## ${label}`);
+    renderedSections.push('');
+    renderedSections.push(
+      matched
+        .map(({ slug, title, description }) => {
+          const url = `${baseUrl}/${slug}`;
+          return `- [${title}](${url})${description ? `: ${description}` : ''}`;
+        })
+        .join('\n')
+    );
+    renderedSections.push('');
+    for (const document of matched) {
+      const index = remaining.indexOf(document);
+      if (index !== -1) remaining.splice(index, 1);
+    }
+  }
+
+  if (remaining.length > 0) {
+    renderedSections.push('## More');
+    renderedSections.push('');
+    renderedSections.push(
+      remaining
+        .map(({ slug, title, description }) =>
+          `- [${title}](${baseUrl}/${slug})${description ? `: ${description}` : ''}`
+        )
+        .join('\n')
+    );
+    renderedSections.push('');
+  }
 
   return [
-    '# Aether Documentation',
+    '# Aether',
     '',
-    '> Pure Markdown documentation for the AI-native Aether IoT edge kernel and SDK.',
+    '> AI-native, industry-neutral IoT edge kernel and SDK.',
     '',
-    entries,
+    'Documentation pages are available as Markdown. Append `.md` to any document URL or send `Accept: text/markdown`.',
+    '',
+    ...renderedSections,
     '',
   ].join('\n');
 }
@@ -101,6 +147,14 @@ export function renderLlmsFull(documents) {
 
 /* v8 ignore start -- CLI filesystem orchestration is exercised by npm run build. */
 async function main() {
+  let htmlBuildPresent = true;
+  try {
+    await fs.access(path.join(DIST_DIR, 'index.html'));
+  } catch {
+    htmlBuildPresent = false;
+  }
+  assertHtmlBuildPresent(htmlBuildPresent);
+
   const files = (await fg('**/*.md', { cwd: CONTENT_DIR, onlyFiles: true })).sort();
   assertFilesFound(files);
 
@@ -128,7 +182,6 @@ async function main() {
     })
   );
 
-  await fs.rm(DIST_DIR, { recursive: true, force: true });
   await Promise.all(
     documents.map(async ({ outRelPath, markdown }) => {
       const outputPath = path.join(DIST_DIR, outRelPath);
@@ -145,7 +198,7 @@ async function main() {
   );
   await fs.writeFile(path.join(DIST_DIR, 'llms-full.txt'), renderLlmsFull(documents), 'utf8');
 
-  console.log(`build-docs: wrote ${documents.length} Markdown documents and 2 text indexes`);
+  console.log(`build-docs: added ${documents.length} Markdown twins and 2 text indexes`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

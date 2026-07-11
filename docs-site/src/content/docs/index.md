@@ -1,6 +1,18 @@
 ---
 title: Aether
 description: AI-native, industry-neutral IoT edge kernel and SDK — architecture, guides, and reference.
+template: splash
+hero:
+  title: Aether
+  tagline: An AI-native, industry-neutral IoT edge kernel and SDK.
+  actions:
+    - text: Get started
+      link: /guides/getting-started/
+      icon: right-arrow
+    - text: Agent quickstart
+      link: /agent-quickstart/
+      variant: minimal
+      icon: rocket
 ---
 
 Aether is an AI-native, industry-neutral IoT edge kernel and SDK. These
@@ -9,8 +21,11 @@ tools, and humans who prefer text.
 
 - Start an automated installation at [Agent Quickstart](/agent-quickstart).
 - Learn the runtime at [Getting Started](/guides/getting-started).
-- Discover every published document through [`/llms.txt`](/llms.txt).
-- Fetch the complete corpus through [`/llms-full.txt`](/llms-full.txt).
+- Discover every published document through
+  [`/llms.txt`](https://docs.aetheriot.workers.dev/llms.txt).
+- Fetch the complete corpus through
+  [`/llms-full.txt`](https://docs.aetheriot.workers.dev/llms-full.txt).
 
-Every document route returns `text/markdown`. This service does not serve
-HTML, JavaScript, CSS, or a browser UI.
+Browsers receive the rendered documentation site. Agents can append `.md` to
+any document URL or send `Accept: text/markdown` to retrieve the Markdown
+source directly.

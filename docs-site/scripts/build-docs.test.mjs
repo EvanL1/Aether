@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertFilesFound,
+  assertHtmlBuildPresent,
   findOutputCollisions,
   renderDocument,
   renderLlmsFull,
@@ -41,18 +42,35 @@ describe('renderDocument', () => {
 });
 
 describe('renderLlmsIndex', () => {
-  it('renders an absolute plain-text index for agents', () => {
+  it('renders a curated, grouped, absolute index for agents', () => {
     const documents = [
+      { slug: '', title: 'Aether', description: 'Root page.' },
       {
         slug: 'agent-quickstart',
         title: 'Agent Quickstart',
         description: 'Install Aether.',
       },
+      {
+        slug: 'concepts/architecture',
+        title: 'Architecture',
+        description: 'Understand the runtime.',
+      },
+      {
+        slug: 'reference/cli',
+        title: 'CLI Reference',
+        description: 'Command reference.',
+      },
     ];
 
-    expect(renderLlmsIndex(documents, 'https://docs.aether-edge.workers.dev')).toContain(
-      '- [Agent Quickstart](https://docs.aether-edge.workers.dev/agent-quickstart): Install Aether.'
+    const output = renderLlmsIndex(documents, 'https://docs.aetheriot.workers.dev');
+    expect(output).toMatch(/^# Aether\n/);
+    expect(output).toContain('## Start Here');
+    expect(output).toContain('## Concepts');
+    expect(output).toContain('## Reference');
+    expect(output).toContain(
+      '- [Agent Quickstart](https://docs.aetheriot.workers.dev/agent-quickstart): Install Aether.'
     );
+    expect(output).not.toContain('[Aether](https://docs.aetheriot.workers.dev/)');
   });
 });
 
@@ -73,6 +91,16 @@ describe('renderLlmsFull', () => {
 describe('assertFilesFound', () => {
   it('throws when zero files are found', () => {
     expect(() => assertFilesFound([])).toThrow(/no markdown files found/);
+  });
+});
+
+describe('assertHtmlBuildPresent', () => {
+  it('rejects running the agent-doc emitter before the HTML build', () => {
+    expect(() => assertHtmlBuildPresent(false)).toThrow(/HTML build/);
+  });
+
+  it('accepts an existing HTML build', () => {
+    expect(() => assertHtmlBuildPresent(true)).not.toThrow();
   });
 });
 

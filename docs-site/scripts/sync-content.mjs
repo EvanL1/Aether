@@ -54,7 +54,10 @@ function extractTitleAndBody(content) {
   // "[text](url)" leaks into <meta name="description"> and llms.txt.
   description = description.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
   if (description.length > DESCRIPTION_MAX_LEN) {
-    description = description.slice(0, DESCRIPTION_MAX_LEN - 1).trimEnd() + '…';
+    const candidate = description.slice(0, DESCRIPTION_MAX_LEN - 1).trimEnd();
+    const lastSpace = candidate.lastIndexOf(' ');
+    const boundary = lastSpace >= DESCRIPTION_MAX_LEN / 2 ? lastSpace : candidate.length;
+    description = candidate.slice(0, boundary).trimEnd() + '…';
   }
   return { title, description };
 }

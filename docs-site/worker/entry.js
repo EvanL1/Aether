@@ -1,29 +1,33 @@
 const MARKDOWN_CONTENT_TYPE = 'text/markdown; charset=utf-8';
 const TEXT_CONTENT_TYPE = 'text/plain; charset=utf-8';
 
-function responseHeaders(contentType, sourceHeaders) {
+function successHeaders(sourceHeaders, contentType) {
   const headers = new Headers(sourceHeaders);
-  headers.set('Content-Type', contentType);
+  if (contentType) headers.set('Content-Type', contentType);
   headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('Cache-Control', 'public, max-age=300');
-  headers.delete('Vary');
+  headers.set('Vary', 'Accept');
   return headers;
 }
 
 function plainResponse(message, status, requestMethod, extraHeaders) {
-  const headers = responseHeaders(TEXT_CONTENT_TYPE, extraHeaders);
+  const headers = successHeaders(extraHeaders, TEXT_CONTENT_TYPE);
   headers.set('Cache-Control', 'no-store');
   return new Response(requestMethod === 'HEAD' ? null : message, { status, headers });
 }
 
-function documentAssetPath(pathname) {
+function markdownAssetPath(pathname) {
   if (pathname === '/') return '/index.md';
-  if (pathname.endsWith('.md') || pathname.endsWith('.txt')) return pathname;
-
+  if (pathname.endsWith('.md')) return pathname;
   const trimmedPath = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
   const lastSegment = trimmedPath.slice(trimmedPath.lastIndexOf('/') + 1);
   if (lastSegment.includes('.')) return null;
   return `${trimmedPath}.md`;
+}
+
+async function fetchAsset(request, env, assetPath) {
+  const sourceUrl = new URL(request.url);
+  const assetUrl = assetPath ? new URL(assetPath, sourceUrl) : sourceUrl;
+  return env.ASSETS.fetch(new Request(assetUrl, request));
 }
 
 export default {
@@ -35,40 +39,42 @@ export default {
     }
 
     const url = new URL(request.url);
-    const assetPath = documentAssetPath(url.pathname);
-    if (assetPath === null) {
-      return plainResponse(
-        'Document not found. See /llms.txt for the index.\n',
-        404,
-        request.method
-      );
+    const accept = request.headers.get('Accept') || '';
+    const wantsMarkdown = url.pathname.endsWith('.md') || accept.includes('text/markdown');
+
+    if (wantsMarkdown) {
+      const assetPath = markdownAssetPath(url.pathname);
+      if (assetPath === null) {
+        return plainResponse('Document not found. See /llms.txt for the index.\n', 404, request.method);
+      }
+
+      let response;
+      try {
+        response = await fetchAsset(request, env, assetPath);
+      } catch {
+        return plainResponse('Documentation temporarily unavailable.\n', 503, request.method);
+      }
+      if (!response.ok) {
+        return plainResponse('Document not found. See /llms.txt for the index.\n', 404, request.method);
+      }
+
+      return new Response(request.method === 'HEAD' ? null : response.body, {
+        status: response.status,
+        headers: successHeaders(response.headers, MARKDOWN_CONTENT_TYPE),
+      });
     }
 
-    const assetUrl = new URL(assetPath, url);
-    let assetResponse;
+    let response;
     try {
-      assetResponse = await env.ASSETS.fetch(new Request(assetUrl, request));
+      response = await fetchAsset(request, env);
     } catch {
-      return plainResponse(
-        'Documentation temporarily unavailable.\n',
-        503,
-        request.method
-      );
+      return plainResponse('Documentation temporarily unavailable.\n', 503, request.method);
     }
-
-    if (!assetResponse.ok) {
-      return plainResponse(
-        'Document not found. See /llms.txt for the index.\n',
-        404,
-        request.method
-      );
-    }
-
-    const contentType = assetPath.endsWith('.txt') ? TEXT_CONTENT_TYPE : MARKDOWN_CONTENT_TYPE;
-    const headers = responseHeaders(contentType, assetResponse.headers);
-    return new Response(request.method === 'HEAD' ? null : assetResponse.body, {
-      status: assetResponse.status,
-      headers,
+    const contentType = url.pathname.endsWith('.txt') ? TEXT_CONTENT_TYPE : undefined;
+    return new Response(request.method === 'HEAD' ? null : response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: successHeaders(response.headers, contentType),
     });
   },
 };
