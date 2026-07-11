@@ -23,6 +23,7 @@
   "devDependencies": {
     "fast-glob": "^3.3.3",
     "github-slugger": "^2.0.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.110.0"
   }
 }
