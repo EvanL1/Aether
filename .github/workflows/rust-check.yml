@@ -171,7 +171,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload Coverage Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: lcov.info
@@ -371,7 +371,7 @@ jobs:
 
       - name: Upload E2E Artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-failure-artifacts
           path: /tmp/e2e-artifacts/

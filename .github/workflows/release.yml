@@ -196,7 +196,7 @@ jobs:
           ls -lh release/
 
       - name: Upload Installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.arch }}-installer
           path: |
@@ -206,7 +206,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Aether CLI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aether-linux-${{ matrix.zig_arch }}
           path: |
@@ -287,7 +287,7 @@ jobs:
           [System.IO.File]::WriteAllText("$PWD/aether-${{ matrix.name }}.zip.sha256", $checksum, [System.Text.Encoding]::ASCII)
 
       - name: Upload Aether CLI
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aether-${{ matrix.name }}
           path: |
