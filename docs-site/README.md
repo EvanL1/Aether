@@ -1,12 +1,16 @@
-# Starlight Starter Kit: Basics
+# Aether Docs Site
 
 [![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
 
-```
-npm create astro@latest -- --template starlight
-```
+Public documentation site for [Aether](https://github.com/EvanL1/AetherEMS),
+an AI-native, industry-neutral IoT edge kernel and SDK. Built with
+[Astro](https://astro.build) + [Starlight](https://starlight.astro.build),
+content synced from the main repo's `docs/` tree, deployed to Cloudflare
+Workers.
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+See [`AGENTS.md`](./AGENTS.md) for how content sync, the build pipeline, and
+the two test suites actually work in this project — read that before making
+changes here.
 
 ## 🚀 Project Structure
 

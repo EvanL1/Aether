@@ -5,6 +5,8 @@ import starlightLlmsTxt from 'starlight-llms-txt';
 import starlightLinksValidator from 'starlight-links-validator';
 
 export default defineConfig({
+  // TODO: update to the real aether-docs.<account-subdomain>.workers.dev URL
+  // after the first Cloudflare deploy (see docs-site/AGENTS.md).
   site: 'https://aether-docs.workers.dev',
   integrations: [
     starlight({
@@ -42,6 +44,14 @@ export default defineConfig({
           promote: ['agent-quickstart'],
           details:
             'Every page on this site is also available as raw Markdown: append `.md` to its URL, or send `Accept: text/markdown`.',
+          optionalLinks: [
+            {
+              label: 'Agent Quickstart',
+              url: '/agent-quickstart.md',
+              description:
+                'Copy-paste command sequence for an AI agent to install, start, and connect to Aether from zero.',
+            },
+          ],
         }),
         starlightLinksValidator(),
       ],
