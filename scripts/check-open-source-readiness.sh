@@ -39,6 +39,7 @@ readonly PUBLIC_PACKAGES=(
     "aether-postgres-history:extensions/postgres-history"
 )
 readonly COMPOSE_VALIDATION_JWT_SECRET='0123456789abcdef0123456789abcdef'
+readonly COMPOSE_VALIDATION_UPLINK_TOKEN='fedcba9876543210fedcba9876543210'
 
 failures=0
 
@@ -186,18 +187,23 @@ while IFS= read -r workflow; do
     if ! rg -Fq "JWT_SECRET_KEY: $COMPOSE_VALIDATION_JWT_SECRET" "$workflow"; then
         fail "$workflow invokes Docker Compose without an explicit CI JWT test key"
     fi
+    if ! rg -Fq "AETHER_UPLINK_CONTROL_TOKEN: $COMPOSE_VALIDATION_UPLINK_TOKEN" "$workflow"; then
+        fail "$workflow invokes Docker Compose without an explicit CI uplink control token"
+    fi
 done < <(rg -l 'docker compose' .github/workflows --glob '*.yml' --glob '*.yaml' || true)
 
 if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
     fail "docker with Compose support is required to validate docker-compose.yml"
 else
-    if JWT_SECRET_KEY='' docker compose -f docker-compose.yml config >/dev/null 2>&1; then
+    if AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_VALIDATION_UPLINK_TOKEN" \
+        JWT_SECRET_KEY='' docker compose -f docker-compose.yml config >/dev/null 2>&1; then
         fail "docker-compose.yml must reject an empty JWT_SECRET_KEY"
     fi
 
     default_services=""
     if ! default_services=$(
         JWT_SECRET_KEY="$COMPOSE_VALIDATION_JWT_SECRET" \
+            AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_VALIDATION_UPLINK_TOKEN" \
             docker compose -f docker-compose.yml config --services
     ); then
         fail "default docker-compose.yml failed with a valid JWT test key"
@@ -211,6 +217,7 @@ else
     redis_services=""
     if ! redis_services=$(
         JWT_SECRET_KEY="$COMPOSE_VALIDATION_JWT_SECRET" \
+            AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_VALIDATION_UPLINK_TOKEN" \
             docker compose -f docker-compose.yml --profile redis config --services
     ); then
         fail "the optional Redis extension profile is invalid"
@@ -222,6 +229,7 @@ else
     postgres_services=""
     if ! postgres_services=$(
         JWT_SECRET_KEY="$COMPOSE_VALIDATION_JWT_SECRET" \
+            AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_VALIDATION_UPLINK_TOKEN" \
             docker compose -f docker-compose.yml --profile postgres-storage config --services
     ); then
         fail "the optional PostgreSQL history profile is invalid"
