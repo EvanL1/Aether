@@ -56,7 +56,7 @@ jsonwebtoken = "9"
 
 # Password hashing (bcrypt - frontend sends MD5, backend stores bcrypt(MD5))
 bcrypt = "0.15"
-md-5 = "0.10"
+md-5 = "0.11"
 
 # ZIP for config export/import
 zip = "2"
