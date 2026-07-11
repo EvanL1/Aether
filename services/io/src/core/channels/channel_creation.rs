@@ -162,9 +162,7 @@ use crate::core::channels::factory::{create_modbus_channel, create_modbus_rtu_ch
 use crate::core::channels::factory::create_gpio_channel;
 
 #[cfg(all(feature = "can", target_os = "linux"))]
-use crate::core::channels::converters::{
-    convert_can_to_point_configs, convert_to_can_point_configs,
-};
+use crate::core::channels::converters::convert_to_can_point_configs;
 #[cfg(all(feature = "can", target_os = "linux"))]
 use crate::core::channels::factory::create_can_channel;
 
@@ -691,7 +689,6 @@ impl ChannelManager {
         debug!("Ch{} creating GPIO channel", channel_id);
 
         let store = self.create_data_store();
-        let point_configs = convert_to_point_configs(runtime_config);
 
         let mut protocol = create_gpio_channel(channel_id, runtime_config);
 
@@ -733,7 +730,6 @@ impl ChannelManager {
 
         let store = self.create_data_store();
         let can_point_configs = convert_to_can_point_configs(runtime_config);
-        let point_configs = convert_can_to_point_configs(runtime_config);
 
         if can_point_configs.is_empty() {
             warn!("Ch{} has no CAN point mappings configured", channel_id);
