@@ -124,7 +124,7 @@ describe('rewriteRelativeLinks', () => {
     const syncedSourceSet = new Set(['docs/guides/writing-rules.md']);
     const out = rewriteRelativeLinks(content, 'docs/guides/writing-rules.md', syncedSourceSet);
     expect(out).toBe(
-      'See [Control Strategies](https://github.com/EvanL1/AetherEMS/blob/main/docs/domain/control-strategies.md) for details.'
+      'See [Control Strategies](https://github.com/EvanL1/Aether/blob/main/docs/domain/control-strategies.md) for details.'
     );
   });
 
@@ -133,7 +133,7 @@ describe('rewriteRelativeLinks', () => {
     const syncedSourceSet = new Set(['docs/guides/ai-assistants.md']);
     const out = rewriteRelativeLinks(content, 'docs/guides/ai-assistants.md', syncedSourceSet);
     expect(out).toBe(
-      '[Safe Operations](https://github.com/EvanL1/AetherEMS/blob/main/docs/domain/safe-operations.md#some-heading)'
+      '[Safe Operations](https://github.com/EvanL1/Aether/blob/main/docs/domain/safe-operations.md#some-heading)'
     );
   });
 
@@ -160,7 +160,7 @@ describe('rewriteRelativeLinks', () => {
     ]);
     const out = rewriteRelativeLinks(content, 'docs/guides/ai-assistants.md', syncedSourceSet);
     expect(out).toBe(
-      'Before enabling writes, read [Safe Operations for AI Agents](https://github.com/EvanL1/AetherEMS/blob/main/docs/domain/safe-operations.md), which explains the control envelope.'
+      'Before enabling writes, read [Safe Operations for AI Agents](https://github.com/EvanL1/Aether/blob/main/docs/domain/safe-operations.md), which explains the control envelope.'
     );
   });
 

@@ -14,7 +14,7 @@ export default defineConfig({
       description:
         'AI-native, industry-neutral IoT edge kernel and SDK — architecture, guides, and reference.',
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/EvanL1/AetherEMS' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/EvanL1/Aether' },
       ],
       sidebar: [
         { label: 'Agent Quickstart', slug: 'agent-quickstart' },

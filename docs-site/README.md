@@ -2,7 +2,7 @@
 
 [![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
 
-Public documentation site for [Aether](https://github.com/EvanL1/AetherEMS),
+Public documentation site for [Aether](https://github.com/EvanL1/Aether),
 an AI-native, industry-neutral IoT edge kernel and SDK. Built with
 [Astro](https://astro.build) + [Starlight](https://starlight.astro.build),
 content synced from the main repo's `docs/` tree, deployed to Cloudflare

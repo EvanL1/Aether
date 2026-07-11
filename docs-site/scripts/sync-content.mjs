@@ -71,7 +71,7 @@ export function synthesizeFrontmatter(content, gitDate) {
 }
 
 const MD_LINK_RE = /\[([^\]]*)\]\((?!https?:\/\/|mailto:|#|\/)([^)\s]+)\)/g;
-const GITHUB_BLOB_BASE = 'https://github.com/EvanL1/AetherEMS/blob/main';
+const GITHUB_BLOB_BASE = 'https://github.com/EvanL1/Aether/blob/main';
 
 // Rewrites every relative Markdown link into an absolute form, so
 // starlight-links-validator (errorOnRelativeLinks: true, the default) can
