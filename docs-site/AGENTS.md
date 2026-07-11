@@ -1,53 +1,63 @@
-# Aether Plain-Text Documentation
+# Aether Documentation
 
-This directory publishes Aether documentation for AI agents through a
-Cloudflare Worker. It is deliberately not a website: production responses
-must be Markdown or plain text, never HTML.
+This directory publishes Aether's English product documentation through a
+dual-mode Cloudflare Worker.
 
-Production URL: `https://docs.aether-edge.workers.dev`.
+Production URL: `https://docs.aetheriot.workers.dev`.
 
-## Content ownership
+## Representations
 
-`content.manifest.txt` is the publication allowlist. `npm run sync` copies
-matching repository Markdown into `src/content/docs/` and rewrites relative
-links to published document routes or GitHub source URLs.
+- Browser requests receive the Astro + Starlight HTML site.
+- A `.md` suffix or `Accept: text/markdown` receives the matching Markdown.
+- `llms.txt` is the curated agent index.
+- `llms-full.txt` is the complete published Markdown corpus.
 
-Everything under `src/content/docs/` is generated except:
+HTML and Markdown are built from the same source set and must never diverge in
+content scope.
+
+## Public content boundary
+
+`content.manifest.txt` is the publication allowlist. Only English product
+documentation belongs in it. Do not publish internal agent instructions,
+plans, migration narratives, ADRs, competitive analysis, or historical
+working notes.
+
+`npm run sync` copies allowlisted repository Markdown into
+`src/content/docs/` and rewrites relative links. Everything in that directory
+is generated except:
 
 - `index.md`
 - `agent-quickstart.md`
 
-Edit the original repository document for generated content. Do not edit a
-generated mirror because the next sync deletes it.
+Edit generated content at its repository source. The next sync deletes edits
+made directly to generated mirrors.
 
-## Build contract
-
-`npm run build` performs two steps:
+## Build pipeline
 
 1. Synchronize allowlisted Markdown.
-2. Delete `dist/`, strip build-only frontmatter, emit one `.md` file per
-   document, then generate `llms.txt` and `llms-full.txt`.
+2. Reject CJK characters in the complete publication set.
+3. Build the Starlight HTML site.
+4. Add Markdown twins, `llms.txt`, and `llms-full.txt` to `dist/`.
 
-The build must not emit `.html`, JavaScript, CSS, images, or framework assets.
-Astro, Starlight, and browser-oriented documentation dependencies are not
-allowed.
+The language check is intentional: public Aether documentation is English-only.
 
 ## Worker contract
 
-`worker/entry.js` maps root, extensionless, trailing-slash, and direct `.md`
-routes to Markdown assets. `.txt` indexes use `text/plain`. Missing documents,
-unsupported methods, and infrastructure failures also return plain text.
+`worker/entry.js` performs representation selection. Normal requests pass to
+the HTML assets. Markdown requests are rewritten to the corresponding `.md`
+asset. Both representations set `Vary: Accept`.
 
-No request header may cause an HTML response. `GET` and `HEAD` are the only
-allowed methods.
+Only `GET` and `HEAD` are allowed. Markdown lookup failures return typed plain
+text responses and must never fall back to HTML.
 
 ## Verification
 
 ```bash
-npm test
+npm run check
+npm run test:coverage
 npm run test:worker
 npm run build
-find dist -type f ! -name '*.md' ! -name '*.txt'
+test -f dist/index.html
+test -f dist/index.md
+test -f dist/llms.txt
 ```
-
-The final `find` command must print nothing.

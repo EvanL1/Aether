@@ -1,27 +1,23 @@
-# Aether Plain-Text Documentation
+# Aether Documentation
 
-A Cloudflare Worker that publishes Aether documentation as Markdown and plain
-text. It has no HTML renderer, theme, browser UI, database, or search service.
+The dual-mode documentation service for
+[Aether](https://github.com/EvanL1/Aether), deployed at
+[`docs.aetheriot.workers.dev`](https://docs.aetheriot.workers.dev).
 
-Public endpoints:
+- Browsers receive a searchable Astro + Starlight site.
+- Agents can append `.md` or request `Accept: text/markdown`.
+- `/llms.txt` provides the curated document index.
+- `/llms-full.txt` provides the complete published corpus.
 
-- `/` — Markdown documentation entry point
-- `/llms.txt` — compact document index with absolute links
-- `/llms-full.txt` — all published documents in one text response
-- `/<document>` and `/<document>.md` — the same Markdown document
-
-Content is synchronized from the repository paths in
-[`content.manifest.txt`](./content.manifest.txt). The only hand-authored entry
-documents are `src/content/docs/index.md` and
-`src/content/docs/agent-quickstart.md`.
+Only English product documentation listed in
+[`content.manifest.txt`](./content.manifest.txt) is published. Internal plans,
+ADRs, migration notes, and competitive analysis are intentionally excluded.
 
 ```bash
 npm ci
-npm test
+npm run check
+npm run test:coverage
 npm run test:worker
 npm run build
-npm run dev
+npm run preview
 ```
-
-`npm run build` deletes `dist/` before emitting Markdown, so stale HTML can
-never survive a rebuild.

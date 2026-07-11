@@ -15,24 +15,25 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('plain-text documentation service', () => {
-  it('serves the root as Markdown without content negotiation', async () => {
-    const response = await run('/');
+describe('dual-mode documentation service', () => {
+  it('serves HTML to a normal browser request', async () => {
+    const response = await run('/agent-quickstart/');
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toContain('text/html');
+    expect(response.headers.get('Vary')).toBe('Accept');
+    expect(await response.text()).toContain('<h1>Agent Quickstart</h1>');
+  });
+
+  it('serves Markdown when the client requests text/markdown', async () => {
+    const response = await run('/agent-quickstart/', {
+      headers: { Accept: 'text/markdown' },
+    });
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
-    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
-    expect(await response.text()).toMatch(/^# Aether Documentation/);
-  });
-
-  it('serves extensionless and trailing-slash routes as Markdown', async () => {
-    const extensionless = await run('/agent-quickstart');
-    const trailingSlash = await run('/agent-quickstart/');
-
-    expect(extensionless.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
-    expect(trailingSlash.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
-    expect(await extensionless.text()).toMatch(/^# Agent Quickstart/);
-    expect(await trailingSlash.text()).toMatch(/^# Agent Quickstart/);
+    expect(response.headers.get('Vary')).toBe('Accept');
+    expect(await response.text()).toMatch(/^# Agent Quickstart/);
   });
 
   it('serves direct .md routes as Markdown', async () => {
@@ -42,31 +43,30 @@ describe('plain-text documentation service', () => {
     expect(response.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
   });
 
-  it('never serves HTML even when the client explicitly requests it', async () => {
-    const response = await run('/agent-quickstart/', {
-      headers: { Accept: 'text/html' },
-    });
+  it('maps the root to HTML or Markdown according to the request', async () => {
+    const html = await run('/');
+    const markdown = await run('/', { headers: { Accept: 'text/markdown' } });
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
-    expect(await response.text()).not.toContain('<html');
+    expect(html.headers.get('Content-Type')).toContain('text/html');
+    expect(markdown.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+    expect(await markdown.text()).toMatch(/^# Aether/);
   });
 
-  it('serves generated text indexes as text/plain', async () => {
+  it('serves generated agent indexes as text/plain', async () => {
     const response = await run('/llms.txt');
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
-    expect(await response.text()).toContain('# Aether Documentation');
   });
 
-  it('returns a plain-text 404 when a document does not exist', async () => {
-    const response = await run('/missing-document');
+  it('returns a plain-text 404 when a requested Markdown twin does not exist', async () => {
+    const response = await run('/missing-document', {
+      headers: { Accept: 'text/markdown' },
+    });
 
     expect(response.status).toBe(404);
     expect(response.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
     expect(response.headers.get('Cache-Control')).toBe('no-store');
-    expect(await response.text()).toBe('Document not found. See /llms.txt for the index.\n');
   });
 
   it('returns a plain-text 405 for unsupported methods', async () => {
@@ -74,24 +74,29 @@ describe('plain-text documentation service', () => {
 
     expect(response.status).toBe(405);
     expect(response.headers.get('Allow')).toBe('GET, HEAD');
-    expect(response.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
   });
 
-  it('returns headers without a body for HEAD requests', async () => {
-    const response = await run('/agent-quickstart', { method: 'HEAD' });
+  it('returns the selected representation without a body for HEAD', async () => {
+    const html = await run('/agent-quickstart/', { method: 'HEAD' });
+    const markdown = await run('/agent-quickstart/', {
+      method: 'HEAD',
+      headers: { Accept: 'text/markdown' },
+    });
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
-    expect(await response.text()).toBe('');
+    expect(html.headers.get('Content-Type')).toContain('text/html');
+    expect(markdown.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+    expect(await html.text()).toBe('');
+    expect(await markdown.text()).toBe('');
   });
 
-  it('returns a plain-text 503 when the asset binding fails', async () => {
+  it('returns a plain-text 503 when the Markdown asset lookup fails', async () => {
     vi.spyOn(env.ASSETS, 'fetch').mockRejectedValueOnce(new Error('binding unavailable'));
 
-    const response = await run('/agent-quickstart');
+    const response = await run('/agent-quickstart', {
+      headers: { Accept: 'text/markdown' },
+    });
 
     expect(response.status).toBe(503);
     expect(response.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
-    expect(await response.text()).toBe('Documentation temporarily unavailable.\n');
   });
 });

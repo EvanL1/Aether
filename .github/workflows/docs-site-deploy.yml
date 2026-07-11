@@ -39,6 +39,10 @@ jobs:
         working-directory: docs-site
         run: npm ci
 
+      - name: Type, content, and language check
+        working-directory: docs-site
+        run: npm run check
+
       - name: Unit tests
         working-directory: docs-site
         run: npm run test:coverage
@@ -47,18 +51,20 @@ jobs:
         working-directory: docs-site
         run: npm run test:worker
 
-      - name: Build plain-text documentation
+      - name: Build dual-mode documentation
         working-directory: docs-site
         run: npm run build
 
-      - name: Reject browser assets
+      - name: Verify HTML and agent representations
         working-directory: docs-site
         shell: bash
         run: |
-          unexpected="$(find dist -type f ! -name '*.md' ! -name '*.txt' -print)"
-          if [[ -n "$unexpected" ]]; then
-            echo "Unexpected non-text documentation assets:"
-            echo "$unexpected"
+          test -f dist/index.html
+          test -f dist/index.md
+          test -f dist/llms.txt
+          test -f dist/llms-full.txt
+          if rg --pcre2 '\p{Han}|\p{Hiragana}|\p{Katakana}|\p{Hangul}' dist/*.md dist/*.txt dist/*/*.md; then
+            echo "Published agent documentation must be English-only."
             exit 1
           fi
 

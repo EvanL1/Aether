@@ -6,14 +6,6 @@
 docs/concepts/*
 docs/guides/*
 docs/reference/*
-docs/architecture/*
-docs/adr/*
-docs/CONFIG_FORMAT_GUIDE.md
-docs/GETTING_STARTED_DEVELOPMENT.md
-docs/websocket-rule-monitor-api.md
-docs/benchmarking.md
 docs/security/dependency-exceptions.md
-AGENTS.md
-ARCHITECTURE.md
 crates/*/README.md
 extensions/*/README.md
