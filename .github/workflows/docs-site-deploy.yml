@@ -1,0 +1,63 @@
+name: Docs Site Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "docs-site/**"
+      - "AGENTS.md"
+      - "ARCHITECTURE.md"
+      - "crates/*/README.md"
+      - "extensions/*/README.md"
+      - ".github/workflows/docs-site-deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-site-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs-site
+        run: npm ci
+
+      - name: Type and content check
+        working-directory: docs-site
+        run: npm run check
+
+      - name: Unit tests
+        working-directory: docs-site
+        run: npm test
+
+      - name: Worker unit tests
+        working-directory: docs-site
+        run: npm run test:worker
+
+      - name: Build (sync content, astro build, emit per-page markdown)
+        working-directory: docs-site
+        run: npm run build
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: docs-site
+          command: deploy
