@@ -211,6 +211,19 @@ pub struct ActionRoutingAuditState {
     pub message: Option<String>,
 }
 
+/// Runtime command-routing projection after the durable mutation commits.
+#[derive(Debug, Clone, ToSchema)]
+pub struct ActionRoutingRuntimeState {
+    /// `published`, or `commands_revoked` when fail-closed reconciliation is required.
+    #[schema(example = "published")]
+    pub status: String,
+    /// True when the runtime must be rebuilt from the committed SQLite view.
+    #[schema(example = false)]
+    pub reconciliation_required: bool,
+    /// Present when commands were revoked after publication failed.
+    pub message: Option<String>,
+}
+
 /// Stable application-command result nested below the success envelope.
 #[derive(Debug, Clone, ToSchema)]
 pub struct ActionRoutingMutationData {
@@ -225,6 +238,7 @@ pub struct ActionRoutingMutationData {
     #[schema(example = 1)]
     pub affected_routes: u64,
     pub audit: ActionRoutingAuditState,
+    pub runtime: ActionRoutingRuntimeState,
     /// Always false after the application command has been accepted.
     #[schema(example = false)]
     pub retryable: bool,

@@ -345,12 +345,21 @@ async fn publication_failure_revokes_the_previous_runtime_route() {
         "fixture starts with a stale route"
     );
 
-    let error = fixture
+    let receipt = fixture
         .mutator
         .mutate(ActionRoutingMutation::upsert(route(7, 1, 3, 5)))
         .await
-        .expect_err("incomplete routing schema must fail publication");
-    assert_eq!(error.kind(), PortErrorKind::Unavailable);
+        .expect("durably committed routing must return a degraded receipt");
+    assert!(!receipt.runtime_status().is_published());
+    assert!(receipt.runtime_status().reconciliation_required());
+    assert_eq!(
+        receipt
+            .runtime_status()
+            .failure()
+            .expect("publication failure")
+            .kind(),
+        PortErrorKind::Unavailable
+    );
     assert!(
         fixture
             .cache
@@ -358,6 +367,24 @@ async fn publication_failure_revokes_the_previous_runtime_route() {
             .is_none(),
         "stale physical command route must be revoked fail-closed"
     );
+}
+
+#[tokio::test]
+async fn http_reports_committed_publication_degradation_as_non_retryable_acceptance() {
+    let fixture = RoutingFixture::missing_measurement_table().await;
+    let router = fixture.router().await;
+
+    let (status, body) = action_route_request(&router, true, true).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["runtime"]["status"], "commands_revoked");
+    assert_eq!(body["data"]["runtime"]["reconciliation_required"], true);
+    assert_eq!(body["data"]["retryable"], false);
+    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM action_routing")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("committed action route count");
+    assert_eq!(stored, 1);
 }
 
 #[tokio::test]
@@ -383,6 +410,8 @@ async fn http_action_routing_requires_identity_and_confirmation_before_database_
     );
     assert_eq!(body["data"]["audit"]["status"], "recorded");
     assert_eq!(body["data"]["affected_routes"], 1);
+    assert_eq!(body["data"]["runtime"]["status"], "published");
+    assert_eq!(body["data"]["runtime"]["reconciliation_required"], false);
     let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM action_routing")
         .fetch_one(&fixture.pool)
         .await

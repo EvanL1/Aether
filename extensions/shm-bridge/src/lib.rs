@@ -11,6 +11,7 @@ mod managed;
 mod manifest;
 #[cfg(unix)]
 mod point_watch;
+mod read_topology;
 mod runtime;
 
 use std::collections::HashMap;
@@ -28,6 +29,7 @@ pub use aether_dataplane::{
     DEFAULT_MAX_SLOTS, SubscriptionBitmap, automation_bitmap_path_from_shm,
     bitmap_path_for_consumer,
 };
+pub use aether_ports::ChannelHealthObservation as ChannelHealthSample;
 pub use channel_reader::{ShmChannelReader, ShmChannelReaderHandle};
 #[cfg(unix)]
 pub use command_sink::{
@@ -40,7 +42,7 @@ pub use events::{
     point_watch_socket_from_shm,
 };
 pub use health::{
-    ChannelHealthManifest, ChannelHealthSample, ShmChannelHealthReader, ShmChannelHealthWriter,
+    ChannelHealthManifest, ShmChannelHealthReader, ShmChannelHealthWriter,
     ShmChannelHealthWriterHandle, channel_health_path_from_shm,
 };
 pub use managed::{ReconnectingSlotSource, ShmClientConfig};
@@ -49,6 +51,7 @@ pub use manifest::{
 };
 #[cfg(unix)]
 pub use point_watch::PointWatchPublisher;
+pub use read_topology::{ShmReadTopologyGeneration, ShmReadTopologyHandle};
 pub use runtime::{ShmRuntimeConfig, ShmWriterGeneration, ShmWriterHandle};
 
 /// Business-neutral value read from one legacy SHM slot.

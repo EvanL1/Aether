@@ -7,7 +7,8 @@ use aether_domain::{
     TimestampMs,
 };
 use aether_shm_bridge::{
-    ChannelPointManifest, ShmChannelReader, ShmRuntimeConfig, ShmWriterHandle,
+    ChannelPointManifest, ReconnectingSlotSource, ShmChannelReader, ShmClientConfig,
+    ShmRuntimeConfig, ShmWriterHandle, SlotSource,
 };
 
 fn manifest(channel_id: u32) -> Arc<ChannelPointManifest> {
@@ -94,6 +95,139 @@ fn canonical_rebuild_invalidates_retained_writers_and_publishes_one_coherent_gen
         .commit_batch(&[sample(23, 7.0, 201)])
         .expect("replacement writer accepts its own manifest");
     assert_ne!(stale.generation(), current.generation());
+}
+
+#[test]
+fn canonical_rebuild_immediately_fences_a_retained_reader_without_inode_polling() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("aether.shm");
+    let active_manifest = manifest(17);
+    let handle = ShmWriterHandle::create_published(
+        ShmRuntimeConfig::new(&path, 64),
+        Arc::clone(&active_manifest),
+        None,
+    )
+    .expect("publish initial generation");
+    handle
+        .generation()
+        .expect("initial generation")
+        .acquisition_writer()
+        .commit_batch(&[sample(17, 12.5, aether_shm_bridge::timestamp_ms())])
+        .expect("write initial value");
+
+    let retained_reader = ReconnectingSlotSource::new(
+        ShmClientConfig::new(&path, active_manifest.layout_hash())
+            .with_identity_check_interval(Duration::from_secs(60))
+            .with_writer_stale_after(Duration::from_secs(60)),
+    );
+    assert_eq!(
+        retained_reader
+            .read_slot(0)
+            .expect("read initial generation")
+            .expect("initial slot")
+            .value(),
+        12.5
+    );
+
+    handle
+        .rebuild(active_manifest)
+        .expect("publish same-layout replacement");
+
+    match retained_reader.read_slot(0) {
+        Ok(Some(replacement)) => assert!(
+            replacement.value().is_nan(),
+            "the retained reader returned a value from the unlinked generation"
+        ),
+        Ok(None) => {},
+        Err(error) => assert!(
+            error.is_retryable(),
+            "a newly published writer without a heartbeat may be unavailable, but not stale: {error}"
+        ),
+    }
+}
+
+#[test]
+fn canonical_rebuild_immediately_fences_the_compatibility_channel_reader() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("aether.shm");
+    let active_manifest = manifest(17);
+    let handle = ShmWriterHandle::create_published(
+        ShmRuntimeConfig::new(&path, 64),
+        Arc::clone(&active_manifest),
+        None,
+    )
+    .expect("publish initial generation");
+    handle
+        .generation()
+        .expect("initial generation")
+        .acquisition_writer()
+        .commit_batch(&[sample(17, 12.5, aether_shm_bridge::timestamp_ms())])
+        .expect("write initial value");
+
+    let retained =
+        ShmChannelReader::open(&path, Arc::clone(&active_manifest)).expect("open typed reader");
+    assert!(
+        retained
+            .read_channel(17, PointKind::Telemetry, 0)
+            .expect("read initial generation")
+            .is_some()
+    );
+
+    handle
+        .rebuild(active_manifest)
+        .expect("publish same-layout replacement");
+
+    let error = retained
+        .read_channel(17, PointKind::Telemetry, 0)
+        .expect_err("retained compatibility reader must reject the replaced inode");
+    assert!(error.is_retryable());
+}
+
+#[test]
+fn writer_restart_immediately_fences_a_retained_reader_without_inode_polling() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("aether.shm");
+    let active_manifest = manifest(17);
+    let first = ShmWriterHandle::create_published(
+        ShmRuntimeConfig::new(&path, 64),
+        Arc::clone(&active_manifest),
+        None,
+    )
+    .expect("publish initial generation");
+    first
+        .generation()
+        .expect("initial generation")
+        .acquisition_writer()
+        .commit_batch(&[sample(17, 12.5, aether_shm_bridge::timestamp_ms())])
+        .expect("write initial value");
+
+    let retained_reader = ReconnectingSlotSource::new(
+        ShmClientConfig::new(&path, active_manifest.layout_hash())
+            .with_identity_check_interval(Duration::from_secs(60))
+            .with_writer_stale_after(Duration::from_secs(60)),
+    );
+    assert_eq!(
+        retained_reader
+            .read_slot(0)
+            .expect("read initial generation")
+            .expect("initial slot")
+            .value(),
+        12.5
+    );
+    drop(first);
+
+    let _replacement =
+        ShmWriterHandle::create_published(ShmRuntimeConfig::new(&path, 64), active_manifest, None)
+            .expect("publish generation after writer restart");
+
+    match retained_reader.read_slot(0) {
+        Ok(Some(replacement)) => assert!(
+            replacement.value().is_nan(),
+            "the retained reader returned a value from the pre-restart inode"
+        ),
+        Ok(None) => {},
+        Err(error) => assert!(error.is_retryable(), "unexpected reader error: {error}"),
+    }
 }
 
 #[test]

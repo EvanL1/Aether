@@ -34,7 +34,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::config::GatewayConfig;
-use crate::live_values::build_data_processing_live_state;
+use crate::live_values::{ShmGatewayValueSource, build_data_processing_live_state};
 
 const MAX_RUNTIME_CONFIG_BYTES: u64 = 1024 * 1024;
 
@@ -42,6 +42,7 @@ const MAX_RUNTIME_CONFIG_BYTES: u64 = 1024 * 1024;
 pub async fn build_data_processing_application(
     database: &SqlitePool,
     gateway: &GatewayConfig,
+    live_values: Arc<ShmGatewayValueSource>,
 ) -> anyhow::Result<Option<Arc<DataProcessingApplication>>> {
     if !gateway.data_processing_enabled {
         return Ok(None);
@@ -116,8 +117,7 @@ pub async fn build_data_processing_application(
     });
     let mut seen_addresses = std::collections::HashSet::new();
     addresses.retain(|address| seen_addresses.insert(*address));
-    let live_state: Arc<dyn LiveState> =
-        build_data_processing_live_state(database, gateway, &addresses).await?;
+    let live_state: Arc<dyn LiveState> = build_data_processing_live_state(live_values, &addresses)?;
     let audit = Arc::new(SqliteAuditSink::initialize(database.clone()).await?);
     let routes = pending
         .into_iter()

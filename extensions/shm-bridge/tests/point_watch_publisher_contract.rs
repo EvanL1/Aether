@@ -38,7 +38,7 @@ async fn typed_acquisition_commit_emits_the_existing_point_watch_wire_frame() {
     )])));
     let handle = ShmWriterHandle::create_published_with_observer(
         ShmRuntimeConfig::new(directory.path().join("aether.shm"), 8),
-        manifest,
+        Arc::clone(&manifest),
         None,
         Some(publisher),
     )
@@ -72,6 +72,7 @@ async fn typed_acquisition_commit_emits_the_existing_point_watch_wire_frame() {
     assert_eq!(event.value(), 12.5);
     assert_eq!(event.raw(), 125.0);
     assert_eq!(event.timestamp_ms(), 4_200);
+    assert!(event.matches_manifest(&manifest));
 
     shutdown.cancel();
     listener_task

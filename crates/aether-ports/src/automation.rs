@@ -568,12 +568,61 @@ impl ActionRoutingMutationKind {
     }
 }
 
+/// Runtime publication state after an action-routing mutation commits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionRoutingRuntimeStatus {
+    /// The command dispatcher is using the committed routing snapshot.
+    Published,
+    /// Runtime publication failed and every action route was revoked
+    /// fail-closed until reconciliation succeeds.
+    CommandsRevoked {
+        /// Internal publication failure retained for audit and reconciliation.
+        failure: PortError,
+    },
+}
+
+impl ActionRoutingRuntimeStatus {
+    /// Returns the stable transport and audit representation.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Published => "published",
+            Self::CommandsRevoked { .. } => "commands_revoked",
+        }
+    }
+
+    /// Returns whether the runtime is using the committed routing snapshot.
+    #[must_use]
+    pub const fn is_published(&self) -> bool {
+        matches!(self, Self::Published)
+    }
+
+    /// Returns whether a later reconciliation must restore command routing.
+    #[must_use]
+    pub const fn reconciliation_required(&self) -> bool {
+        !self.is_published()
+    }
+
+    /// Returns the retained runtime-publication failure, when degraded.
+    #[must_use]
+    pub const fn failure(&self) -> Option<&PortError> {
+        match self {
+            Self::Published => None,
+            Self::CommandsRevoked { failure } => Some(failure),
+        }
+    }
+}
+
 /// Receipt returned after an action-routing mutation is durably applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// A revoked runtime is still an accepted, non-idempotent mutation: callers
+/// must reconcile it from SQLite and must not retry the committed command.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionRoutingMutationReceipt {
     kind: ActionRoutingMutationKind,
     target: ActionRoutingTarget,
     affected_routes: u64,
+    runtime_status: ActionRoutingRuntimeStatus,
 }
 
 impl ActionRoutingMutationReceipt {
@@ -588,31 +637,55 @@ impl ActionRoutingMutationReceipt {
             kind,
             target,
             affected_routes,
+            runtime_status: ActionRoutingRuntimeStatus::Published,
+        }
+    }
+
+    /// Creates an accepted receipt whose runtime command routes were revoked
+    /// after the durable mutation committed but publication failed.
+    #[must_use]
+    pub fn commands_revoked(
+        kind: ActionRoutingMutationKind,
+        target: ActionRoutingTarget,
+        affected_routes: u64,
+        failure: PortError,
+    ) -> Self {
+        Self {
+            kind,
+            target,
+            affected_routes,
+            runtime_status: ActionRoutingRuntimeStatus::CommandsRevoked { failure },
         }
     }
 
     /// Returns the applied operation.
     #[must_use]
-    pub const fn kind(self) -> ActionRoutingMutationKind {
+    pub const fn kind(&self) -> ActionRoutingMutationKind {
         self.kind
     }
 
     /// Returns the affected route scope.
     #[must_use]
-    pub const fn target(self) -> ActionRoutingTarget {
+    pub const fn target(&self) -> ActionRoutingTarget {
         self.target
     }
 
     /// Returns the single-route key when the mutation targeted one route.
     #[must_use]
-    pub const fn route_key(self) -> Option<ActionRouteKey> {
+    pub const fn route_key(&self) -> Option<ActionRouteKey> {
         self.target.route_key()
     }
 
     /// Returns the number of routes inserted, updated, toggled, or removed.
     #[must_use]
-    pub const fn affected_routes(self) -> u64 {
+    pub const fn affected_routes(&self) -> u64 {
         self.affected_routes
+    }
+
+    /// Returns the runtime publication state after the durable commit.
+    #[must_use]
+    pub const fn runtime_status(&self) -> &ActionRoutingRuntimeStatus {
+        &self.runtime_status
     }
 }
 
@@ -620,7 +693,9 @@ impl ActionRoutingMutationReceipt {
 ///
 /// Authorization, confirmation, and audit are application-layer concerns.
 /// Implementations own persistence and any atomic refresh of their runtime
-/// routing view.
+/// routing view. Once persistence commits, a publication failure must be
+/// returned as an accepted [`ActionRoutingMutationReceipt::commands_revoked`]
+/// receipt; a port error means the durable mutation did not commit.
 #[async_trait]
 pub trait AutomationActionRoutingMutator: Send + Sync + 'static {
     /// Applies one typed action-routing mutation.

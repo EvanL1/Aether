@@ -70,9 +70,24 @@ impl ActionRoutingApplication {
 
         match self.mutator.mutate(mutation).await {
             Ok(receipt) => {
-                let completion_detail = format!(
-                    "{mutation_detail}; affected_routes={}",
-                    receipt.affected_routes()
+                let runtime = receipt.runtime_status();
+                let completion_detail = runtime.failure().map_or_else(
+                    || {
+                        format!(
+                            "{mutation_detail}; affected_routes={}; runtime_status={}; reconciliation_required={}",
+                            receipt.affected_routes(),
+                            runtime.as_str(),
+                            runtime.reconciliation_required()
+                        )
+                    },
+                    |failure| {
+                        format!(
+                            "{mutation_detail}; affected_routes={}; runtime_status={}; reconciliation_required={}; runtime_failure={failure}",
+                            receipt.affected_routes(),
+                            runtime.as_str(),
+                            runtime.reconciliation_required()
+                        )
+                    },
                 );
                 match self
                     .record_audit(

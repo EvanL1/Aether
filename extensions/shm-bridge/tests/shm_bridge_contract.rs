@@ -279,6 +279,18 @@ fn point_watch_wire_frame_is_explicit_little_endian() {
     );
 }
 
+#[test]
+fn point_watch_event_matches_only_its_typed_address_in_the_current_manifest() {
+    let manifest = ChannelPointManifest::from_entries([(10, [2, 1, 0, 0])]);
+    let current = PointWatchEvent::new(10, PointKind::Telemetry, 1, 1, 12.5, 125.0, 1_000, 99);
+    let stale_slot = PointWatchEvent::new(10, PointKind::Telemetry, 1, 2, 12.5, 125.0, 1_000, 99);
+    let stale_kind = PointWatchEvent::new(10, PointKind::Status, 1, 1, 1.0, 1.0, 1_000, 99);
+
+    assert!(current.matches_manifest(&manifest));
+    assert!(!stale_slot.matches_manifest(&manifest));
+    assert!(!stale_kind.matches_manifest(&manifest));
+}
+
 #[tokio::test]
 async fn point_watch_listener_delivers_hints_on_an_isolated_socket() {
     use tokio::io::AsyncWriteExt;

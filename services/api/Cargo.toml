@@ -50,6 +50,7 @@ futures = { workspace = true }
 dashmap = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
+arc-swap = "1.7"
 
 # JWT authentication
 jsonwebtoken = "9"
@@ -67,6 +68,9 @@ utoipa-swagger-ui = { workspace = true, optional = true }
 
 [features]
 swagger-ui = ["utoipa-swagger-ui", "common/openapi"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

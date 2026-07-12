@@ -13,7 +13,8 @@ use aether_domain::{
     PhysicalDeviceCommand, PointId, PointKind, TimestampMs,
 };
 use aether_ports::{
-    CommandDispatcher, CommandReceipt, DeviceCommandSink, PortError, PortErrorKind, PortResult,
+    CommandDispatcher, CommandReceipt, CommandTopologyFence, DeviceCommandSink, PortError,
+    PortErrorKind, PortResult,
 };
 use aether_rules::{RuleActionCommand, RuleActionCommandFacade};
 use async_trait::async_trait;
@@ -202,16 +203,26 @@ impl RuleActionCommandFacade for RuleActionApplication {
         let actor = Actor::new(COMMISSIONED_RULE_ACTOR_ID).with_permission("device.control");
         let context = RequestContext::new(request_uuid.to_string(), actor, true, timestamp);
 
-        let acceptance = self
-            .application
-            .write_point(
-                &context,
-                CommandId::new(request_uuid.as_u128()),
-                command.target(),
-                command.value(),
-            )
-            .await
-            .map_err(rule_action_port_error)?;
+        let command_id = CommandId::new(request_uuid.as_u128());
+        let acceptance = match command.topology_fence() {
+            Some(fence) => {
+                self.application
+                    .write_point_fenced(
+                        &context,
+                        command_id,
+                        command.target(),
+                        command.value(),
+                        fence,
+                    )
+                    .await
+            },
+            None => {
+                self.application
+                    .write_point(&context, command_id, command.target(), command.value())
+                    .await
+            },
+        }
+        .map_err(rule_action_port_error)?;
         if let Some(failure) = acceptance.completion_audit().failure() {
             tracing::error!(
                 request_id = acceptance.request_id(),
@@ -271,11 +282,12 @@ impl AutomationCommandDispatcher {
     pub fn new(manager: Arc<InstanceManager>, sink: Arc<dyn DeviceCommandSink>) -> Self {
         Self { manager, sink }
     }
-}
 
-#[async_trait]
-impl CommandDispatcher for AutomationCommandDispatcher {
-    async fn dispatch(&self, command: ControlCommand) -> PortResult<CommandReceipt> {
+    async fn dispatch_inner(
+        &self,
+        command: ControlCommand,
+        fence: Option<CommandTopologyFence>,
+    ) -> PortResult<CommandReceipt> {
         let logical = command.target();
         let source_type = match logical.kind() {
             PointKind::Command => aether_model::PointType::Control,
@@ -287,28 +299,76 @@ impl CommandDispatcher for AutomationCommandDispatcher {
                 ));
             },
         };
-        let routed = self
-            .manager
-            .routing_cache
-            .lookup_m2c_by_parts(
-                logical.instance_id().get(),
-                source_type,
-                logical.point_id().get(),
-            )
-            .ok_or_else(|| {
-                PortError::new(
+        // Pin routing and health from one service generation across the whole
+        // command decision. The SQLite constraint read may await, but a later
+        // topology publication cannot alter this retained immutable view.
+        let runtime = if let Some(topology) = self.manager.runtime_topology.get() {
+            Some(Arc::clone(topology).pin_command().await)
+        } else {
+            None
+        };
+        validate_command_topology_fence(
+            fence,
+            runtime
+                .as_ref()
+                .map(|runtime| runtime.generation().sequence()),
+        )?;
+        let (channel_id, physical_kind, physical_point_id) = if let Some(runtime) = &runtime {
+            let routed = runtime
+                .generation()
+                .action_route(logical.instance_id().get(), logical.point_id().get())
+                .ok_or_else(|| {
+                    PortError::new(
+                        PortErrorKind::Rejected,
+                        format!("no enabled physical route for logical target {logical:?}"),
+                    )
+                })?;
+            if !routed.kind().is_writable() {
+                return Err(PortError::new(
                     PortErrorKind::Rejected,
-                    format!("no enabled physical route for logical target {logical:?}"),
+                    "logical command route resolved to a read-only physical point",
+                ));
+            }
+            (
+                routed.channel_id().get(),
+                routed.kind(),
+                routed.point_id().get(),
+            )
+        } else {
+            let routed = self
+                .manager
+                .routing_cache
+                .lookup_m2c_by_parts(
+                    logical.instance_id().get(),
+                    source_type,
+                    logical.point_id().get(),
                 )
-            })?;
+                .ok_or_else(|| {
+                    PortError::new(
+                        PortErrorKind::Rejected,
+                        format!("no enabled physical route for logical target {logical:?}"),
+                    )
+                })?;
+            let kind = match routed.point_type {
+                aether_model::PointType::Control => PointKind::Command,
+                aether_model::PointType::Adjustment => PointKind::Action,
+                aether_model::PointType::Telemetry | aether_model::PointType::Signal => {
+                    return Err(PortError::new(
+                        PortErrorKind::Rejected,
+                        format!("logical command route resolved to read-only target {routed}"),
+                    ));
+                },
+            };
+            (routed.channel_id, kind, routed.point_id)
+        };
 
-        let (physical_kind, constraints) = match routed.point_type {
-            aether_model::PointType::Control => {
+        let constraints = match physical_kind {
+            PointKind::Command => {
                 let exists = sqlx::query_scalar::<_, i64>(
                     "SELECT 1 FROM control_points WHERE channel_id = ? AND point_id = ?",
                 )
-                .bind(i64::from(routed.channel_id))
-                .bind(i64::from(routed.point_id))
+                .bind(i64::from(channel_id))
+                .bind(i64::from(physical_point_id))
                 .fetch_optional(&self.manager.pool)
                 .await
                 .map_err(database_port_error)?;
@@ -317,19 +377,19 @@ impl CommandDispatcher for AutomationCommandDispatcher {
                         PortErrorKind::Rejected,
                         format!(
                             "route target C:{}:{} has no configured command point",
-                            routed.channel_id, routed.point_id
+                            channel_id, physical_point_id
                         ),
                     ));
                 }
-                (PointKind::Command, CommandConstraints::unbounded())
+                CommandConstraints::unbounded()
             },
-            aether_model::PointType::Adjustment => {
+            PointKind::Action => {
                 let limits = sqlx::query_as::<_, (Option<f64>, Option<f64>, f64)>(
                     "SELECT min_value, max_value, step FROM adjustment_points
                      WHERE channel_id = ? AND point_id = ?",
                 )
-                .bind(i64::from(routed.channel_id))
-                .bind(i64::from(routed.point_id))
+                .bind(i64::from(channel_id))
+                .bind(i64::from(physical_point_id))
                 .fetch_optional(&self.manager.pool)
                 .await
                 .map_err(database_port_error)?
@@ -338,26 +398,24 @@ impl CommandDispatcher for AutomationCommandDispatcher {
                         PortErrorKind::Rejected,
                         format!(
                             "route target A:{}:{} has no configured action point",
-                            routed.channel_id, routed.point_id
+                            channel_id, physical_point_id
                         ),
                     )
                 })?;
-                let constraints = CommandConstraints::new(limits.0, limits.1, Some(limits.2))
-                    .map_err(|error| {
-                        PortError::new(
-                            PortErrorKind::Rejected,
-                            format!(
-                                "invalid limits for A:{}:{}: {error}",
-                                routed.channel_id, routed.point_id
-                            ),
-                        )
-                    })?;
-                (PointKind::Action, constraints)
+                CommandConstraints::new(limits.0, limits.1, Some(limits.2)).map_err(|error| {
+                    PortError::new(
+                        PortErrorKind::Rejected,
+                        format!(
+                            "invalid limits for A:{}:{}: {error}",
+                            channel_id, physical_point_id
+                        ),
+                    )
+                })?
             },
-            aether_model::PointType::Telemetry | aether_model::PointType::Signal => {
+            PointKind::Telemetry | PointKind::Status => {
                 return Err(PortError::new(
                     PortErrorKind::Rejected,
-                    format!("logical command route resolved to read-only target {routed}"),
+                    "logical command route resolved to a read-only physical point",
                 ));
             },
         };
@@ -367,37 +425,40 @@ impl CommandDispatcher for AutomationCommandDispatcher {
             .validate_at(now, constraints)
             .map_err(|error| PortError::new(PortErrorKind::Rejected, error.to_string()))?;
 
-        let health_reader = self
-            .manager
-            .channel_health_reader
-            .load_full()
-            .ok_or_else(|| {
-                PortError::new(
-                    PortErrorKind::Unavailable,
-                    "channel-health SHM reader is not configured",
-                )
-            })?;
-        match health_reader.read_channel(routed.channel_id) {
-            Ok(Some(sample)) if sample.online() => {},
-            Ok(Some(_)) => {
+        let health = if let Some(runtime) = &runtime {
+            runtime.generation().channel_health(channel_id)
+        } else {
+            self.manager
+                .channel_health_reader
+                .load_full()
+                .ok_or_else(|| {
+                    PortError::new(
+                        PortErrorKind::Unavailable,
+                        "channel-health SHM reader is not configured",
+                    )
+                })?
+                .read_channel(channel_id)
+        }?;
+        match health {
+            Some(sample) if sample.online() => {},
+            Some(_) => {
                 return Err(PortError::new(
                     PortErrorKind::Unavailable,
-                    format!("channel {} is offline", routed.channel_id),
+                    format!("channel {channel_id} is offline"),
                 ));
             },
-            Ok(None) => {
+            None => {
                 return Err(PortError::new(
                     PortErrorKind::Unavailable,
-                    format!("channel {} has no health sample", routed.channel_id),
+                    format!("channel {channel_id} has no health sample"),
                 ));
             },
-            Err(error) => return Err(error),
         }
 
         let physical_target = ChannelCommandAddress::new(
-            ChannelId::new(routed.channel_id),
+            ChannelId::new(channel_id),
             physical_kind,
-            PointId::new(routed.point_id),
+            PointId::new(physical_point_id),
         )
         .map_err(|error| PortError::new(PortErrorKind::Rejected, error.to_string()))?;
         let physical = PhysicalDeviceCommand::new(
@@ -409,8 +470,50 @@ impl CommandDispatcher for AutomationCommandDispatcher {
         )
         .map_err(|error| PortError::new(PortErrorKind::Rejected, error.to_string()))?;
 
-        self.sink.send(physical).await
+        let receipt = self.sink.send(physical).await;
+        drop(runtime);
+        receipt
     }
+}
+
+#[async_trait]
+impl CommandDispatcher for AutomationCommandDispatcher {
+    async fn dispatch(&self, command: ControlCommand) -> PortResult<CommandReceipt> {
+        self.dispatch_inner(command, None).await
+    }
+
+    async fn dispatch_fenced(
+        &self,
+        command: ControlCommand,
+        fence: CommandTopologyFence,
+    ) -> PortResult<CommandReceipt> {
+        self.dispatch_inner(command, Some(fence)).await
+    }
+}
+
+fn validate_command_topology_fence(
+    fence: Option<CommandTopologyFence>,
+    current_sequence: Option<u64>,
+) -> PortResult<()> {
+    let Some(fence) = fence else {
+        return Ok(());
+    };
+    let current_sequence = current_sequence.ok_or_else(|| {
+        PortError::new(
+            PortErrorKind::Unavailable,
+            "topology-fenced command cannot verify a runtime generation",
+        )
+    })?;
+    if current_sequence != fence.expected_sequence() {
+        return Err(PortError::new(
+            PortErrorKind::Conflict,
+            format!(
+                "rule command topology changed: expected sequence {}, current sequence {current_sequence}",
+                fence.expected_sequence()
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn database_port_error(error: sqlx::Error) -> PortError {
@@ -418,4 +521,28 @@ fn database_port_error(error: sqlx::Error) -> PortError {
         PortErrorKind::Unavailable,
         format!("command configuration database unavailable: {error}"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_command_topology_fence;
+    use aether_ports::{CommandTopologyFence, PortErrorKind};
+
+    #[test]
+    fn topology_fence_accepts_only_the_exact_pinned_sequence() {
+        let fence = CommandTopologyFence::new(7);
+
+        assert!(validate_command_topology_fence(Some(fence), Some(7)).is_ok());
+        let error = validate_command_topology_fence(Some(fence), Some(8))
+            .expect_err("cross-generation rule command must fail closed");
+        assert_eq!(error.kind(), PortErrorKind::Conflict);
+    }
+
+    #[test]
+    fn topology_fence_requires_a_runtime_generation_but_manual_dispatch_does_not() {
+        let error = validate_command_topology_fence(Some(CommandTopologyFence::new(7)), None)
+            .expect_err("fenced command without runtime topology must fail closed");
+        assert_eq!(error.kind(), PortErrorKind::Unavailable);
+        assert!(validate_command_topology_fence(None, None).is_ok());
+    }
 }

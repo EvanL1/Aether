@@ -12,17 +12,68 @@ use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::SqlitePool;
 
+use crate::infra::runtime_topology::{AutomationTopologyHandle, PointWatchReadiness};
+
 /// Owns durable rule mutation and the corresponding scheduler refresh.
 pub struct SqliteRuleMutator<S: StateStore> {
     pool: SqlitePool,
     scheduler: Arc<RuleScheduler<S>>,
+    topology: Option<Arc<AutomationTopologyHandle>>,
+    point_watch_readiness: Option<Arc<PointWatchReadiness>>,
+    manifest_source: Option<aether_shm_bridge::ChannelPointManifestSource>,
 }
 
-impl<S: StateStore> SqliteRuleMutator<S> {
+impl<S: StateStore + 'static> SqliteRuleMutator<S> {
     /// Creates the adapter over the rule database and active scheduler.
     #[must_use]
     pub fn new(pool: SqlitePool, scheduler: Arc<RuleScheduler<S>>) -> Self {
-        Self { pool, scheduler }
+        Self {
+            pool,
+            scheduler,
+            topology: None,
+            point_watch_readiness: None,
+            manifest_source: None,
+        }
+    }
+
+    /// Serializes production subscription reloads with topology publication.
+    #[must_use]
+    pub fn with_topology_guard(
+        mut self,
+        topology: Arc<AutomationTopologyHandle>,
+        point_watch_readiness: Arc<PointWatchReadiness>,
+        manifest_source: aether_shm_bridge::ChannelPointManifestSource,
+    ) -> Self {
+        self.topology = Some(topology);
+        self.point_watch_readiness = Some(point_watch_readiness);
+        self.manifest_source = Some(manifest_source);
+        self
+    }
+
+    async fn reload_scheduler(&self) -> aether_rules::Result<usize> {
+        let (Some(topology), Some(readiness), Some(manifest_source)) = (
+            &self.topology,
+            &self.point_watch_readiness,
+            &self.manifest_source,
+        ) else {
+            return self.scheduler.reload_rules().await;
+        };
+
+        let _rebuild = readiness.lock_rebuild().await;
+        let view = Arc::clone(topology).pin_command().await;
+        readiness.mark_unready();
+        let result = self.scheduler.reload_rules().await;
+        if result.is_ok() {
+            let generation = view.generation();
+            let manifest_matches = manifest_source.load().is_some_and(|manifest| {
+                manifest.layout_hash() == generation.point_manifest().layout_hash()
+                    && manifest.slot_count() == generation.point_manifest().slot_count()
+            });
+            if manifest_matches {
+                readiness.mark_ready(generation.sequence());
+            }
+        }
+        result
     }
 }
 
@@ -181,7 +232,7 @@ impl<S: StateStore + 'static> AutomationRuleMutator for SqliteRuleMutator<S> {
                 rule_id
             },
             RuleMutation::Reload => {
-                return match self.scheduler.reload_rules().await {
+                return match self.reload_scheduler().await {
                     Ok(_) => Ok(RuleMutationReceipt::reload()),
                     Err(error) => {
                         self.scheduler.stop();
@@ -198,7 +249,7 @@ impl<S: StateStore + 'static> AutomationRuleMutator for SqliteRuleMutator<S> {
             },
         };
 
-        match self.scheduler.reload_rules().await {
+        match self.reload_scheduler().await {
             Ok(_) => Ok(RuleMutationReceipt::new(rule_id, kind)),
             Err(error) => {
                 self.scheduler.stop();

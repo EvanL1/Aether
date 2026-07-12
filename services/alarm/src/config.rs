@@ -12,6 +12,7 @@ pub struct AlarmConfig {
     pub point_watch_debounce_ms: u64,
     pub shm_writer_stale_after_ms: u64,
     pub shm_identity_check_interval_ms: u64,
+    pub shm_topology_refresh_interval_ms: u64,
     pub db_path: String,
     /// Monitoring check interval in seconds
     pub data_fetch_interval: u64,
@@ -50,6 +51,10 @@ impl Default for AlarmConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(250),
+            shm_topology_refresh_interval_ms: env::var("SHM_TOPOLOGY_REFRESH_INTERVAL_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1_000),
             db_path: env::var("AETHER_DB_PATH")
                 .unwrap_or_else(|_| "/app/data/aether.db".to_string()),
             data_fetch_interval: env::var("DATA_FETCH_INTERVAL")

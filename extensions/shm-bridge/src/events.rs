@@ -135,6 +135,23 @@ impl PointWatchEvent {
     pub const fn producer_id(self) -> u64 {
         self.producer_id
     }
+
+    /// Returns whether this hint still names the same typed slot in a
+    /// consumer's current physical manifest.
+    ///
+    /// Event payload values are never authoritative. Consumers must call this
+    /// before using the slot as a wake-up hint, then re-read SHM from the
+    /// pinned current topology generation.
+    #[must_use]
+    pub fn matches_manifest(self, manifest: &crate::ChannelPointManifest) -> bool {
+        let Some(kind) = self.point_kind() else {
+            return false;
+        };
+        manifest
+            .slot(self.channel_id, kind, self.point_id)
+            .and_then(|slot| u64::try_from(slot).ok())
+            == Some(self.slot_index)
+    }
 }
 
 const fn point_kind_code(kind: PointKind) -> u8 {

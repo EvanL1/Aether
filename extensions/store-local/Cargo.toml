@@ -19,13 +19,14 @@ async-trait = { workspace = true }
 fs2 = "0.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
+rustc-hash = { workspace = true, optional = true }
 tokio = { version = "1.35", default-features = false, features = ["rt", "sync"] }
 sqlx = { workspace = true, optional = true }
 
 [features]
 default = []
 sqlite-audit = ["dep:sqlx"]
-sqlite-topology = ["dep:aether-shm-bridge", "dep:sqlx"]
+sqlite-topology = ["dep:aether-shm-bridge", "dep:rustc-hash", "dep:sqlx"]
 
 [dev-dependencies]
 aether-testkit = { version = "0.5.0", path = "../../crates/aether-testkit" }

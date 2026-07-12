@@ -4,14 +4,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aether_domain::PointKind;
-use aether_ports::{PortError, PortErrorKind, PortResult};
+use aether_domain::{ChannelId, PointKind};
+#[cfg(test)]
+use aether_ports::ChannelHealthObservation;
+use aether_ports::{ChannelHealthSource, PortError, PortErrorKind, PortResult};
 use aether_shm_bridge::{
-    ChannelPointManifest, ReconnectingSlotSource, ShmChannelHealthReader, ShmClientConfig,
+    ChannelPointManifest, PointWatchEvent, ShmClientConfig, ShmReadTopologyGeneration,
     SlotSnapshot, SlotSource,
 };
-use aether_store_local::load_sqlite_shm_topology;
+use aether_store_local::{SqliteLiveTopologySnapshot, load_sqlite_live_topology};
 use anyhow::Context;
+use arc_swap::ArcSwap;
 use sqlx::SqlitePool;
 
 use crate::config::AlarmConfig;
@@ -72,13 +75,6 @@ impl AlarmRouting {
     }
 }
 
-/// Read side for per-channel connectivity, deliberately separate from point
-/// values so online state cannot be fabricated from measurement data.
-pub trait ChannelHealthSource: Send + Sync + 'static {
-    /// Reads a channel's online state as `1.0` or `0.0`.
-    fn read_channel(&self, channel_id: u32) -> PortResult<Option<SlotSnapshot>>;
-}
-
 /// Health source used until the dedicated SHM channel-health plane is enabled.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -86,21 +82,8 @@ pub struct NoChannelHealth;
 
 #[cfg(test)]
 impl ChannelHealthSource for NoChannelHealth {
-    fn read_channel(&self, _channel_id: u32) -> PortResult<Option<SlotSnapshot>> {
+    fn read_channel(&self, _channel_id: ChannelId) -> PortResult<Option<ChannelHealthObservation>> {
         Ok(None)
-    }
-}
-
-impl ChannelHealthSource for ShmChannelHealthReader {
-    fn read_channel(&self, channel_id: u32) -> PortResult<Option<SlotSnapshot>> {
-        Ok(
-            ShmChannelHealthReader::read_channel(self, channel_id)?.map(|sample| {
-                SlotSnapshot::new(
-                    if sample.online() { 1.0 } else { 0.0 },
-                    sample.timestamp_ms(),
-                )
-            }),
-        )
     }
 }
 
@@ -112,20 +95,31 @@ pub trait AlarmValueSource: Send + Sync + 'static {
     /// Resolves the physical slot used for PointWatch subscription.
     /// Channel-health rules use a separate segment and return `None`.
     fn watched_slot(&self, rule: &AlertRule) -> PortResult<Option<usize>>;
+
+    /// Validates a PointWatch hint against the current typed manifest.
+    fn validated_point_watch_slot(&self, _event: PointWatchEvent) -> Option<usize> {
+        None
+    }
 }
 
-/// Alarm value adapter over the self-healing slot source and SQLite-derived
-/// manifest/routing snapshots.
+/// Alarm value adapter over an atomically replaceable topology generation.
 pub struct ShmAlarmValueSource {
+    current: ArcSwap<AlarmValueGeneration>,
+}
+
+struct AlarmValueGeneration {
     slots: Arc<dyn SlotSource>,
     manifest: Arc<ChannelPointManifest>,
     routing: Arc<AlarmRouting>,
     channel_health: Arc<dyn ChannelHealthSource>,
+    topology: Option<Arc<ShmReadTopologyGeneration>>,
+    digest: u64,
 }
 
 impl ShmAlarmValueSource {
     /// Creates an alarm value source from independently testable capabilities.
     #[must_use]
+    #[cfg(test)]
     pub fn new<S, H>(
         slots: Arc<S>,
         manifest: Arc<ChannelPointManifest>,
@@ -137,13 +131,77 @@ impl ShmAlarmValueSource {
         H: ChannelHealthSource,
     {
         Self {
-            slots,
-            manifest,
-            routing,
-            channel_health,
+            current: ArcSwap::from_pointee(AlarmValueGeneration {
+                slots,
+                manifest,
+                routing,
+                channel_health,
+                topology: None,
+                digest: 0,
+            }),
         }
     }
 
+    /// Reloads one SQLite topology snapshot and atomically publishes it after
+    /// both physical SHM planes validate against that same snapshot.
+    pub async fn refresh_topology(
+        &self,
+        pool: &SqlitePool,
+        config: &AlarmConfig,
+    ) -> PortResult<bool> {
+        let snapshot = load_sqlite_live_topology(pool).await?;
+        let current = self.current.load_full();
+        if current.digest == snapshot.digest() {
+            return Ok(false);
+        }
+
+        if physical_layout_matches(&current, &snapshot) {
+            let routing = Arc::new(alarm_routing_from_snapshot(&snapshot));
+            let next = Arc::new(AlarmValueGeneration {
+                slots: Arc::clone(&current.slots),
+                manifest: Arc::clone(&current.manifest),
+                routing,
+                channel_health: Arc::clone(&current.channel_health),
+                topology: current.topology.clone(),
+                digest: snapshot.digest(),
+            });
+            self.current.store(next);
+            return Ok(true);
+        }
+
+        let config = config.clone();
+        let candidate = tokio::task::spawn_blocking(move || {
+            build_alarm_generation(snapshot, &config, TopologyOpenMode::ValidatePhysical)
+        })
+        .await
+        .map_err(|error| {
+            PortError::new(
+                PortErrorKind::Unavailable,
+                format!("alarm topology validation task failed: {error}"),
+            )
+        })??;
+        let candidate = Arc::new(candidate);
+        let topology = Arc::clone(candidate.topology.as_ref().ok_or_else(|| {
+            PortError::new(
+                PortErrorKind::Permanent,
+                "validated alarm generation is missing its SHM topology",
+            )
+        })?);
+        topology
+            .with_validated_authority(|| self.current.store(candidate))
+            .map_err(retryable_topology_transition)?;
+        Ok(true)
+    }
+
+    /// Returns whether an event still names the current typed physical slot.
+    #[must_use]
+    pub fn accepts_point_watch_event(&self, event: PointWatchEvent) -> bool {
+        let generation = self.current.load();
+        event.matches_manifest(&generation.manifest)
+    }
+}
+
+impl AlarmValueGeneration {
     fn read_point(&self, point: ChannelPointRef) -> PortResult<Option<SlotSnapshot>> {
         let Some(slot) = self
             .manifest
@@ -210,24 +268,39 @@ enum ResolvedAlarmTarget {
 
 impl AlarmValueSource for ShmAlarmValueSource {
     fn read_rule(&self, rule: &AlertRule) -> PortResult<Option<SlotSnapshot>> {
-        match self.resolve_target(rule)? {
-            Some(ResolvedAlarmTarget::Point(target)) => self.read_point(target),
-            Some(ResolvedAlarmTarget::ChannelHealth(channel_id)) => {
-                self.channel_health.read_channel(channel_id)
-            },
+        let generation = self.current.load();
+        match generation.resolve_target(rule)? {
+            Some(ResolvedAlarmTarget::Point(target)) => generation.read_point(target),
+            Some(ResolvedAlarmTarget::ChannelHealth(channel_id)) => Ok(generation
+                .channel_health
+                .read_channel(ChannelId::new(channel_id))?
+                .map(|sample| {
+                    SlotSnapshot::new(
+                        if sample.online() { 1.0 } else { 0.0 },
+                        sample.timestamp_ms(),
+                    )
+                })),
             None => Ok(None),
         }
     }
 
     fn watched_slot(&self, rule: &AlertRule) -> PortResult<Option<usize>> {
-        match self.resolve_target(rule)? {
+        let generation = self.current.load();
+        match generation.resolve_target(rule)? {
             Some(ResolvedAlarmTarget::Point(target)) => {
-                Ok(self
+                Ok(generation
                     .manifest
                     .slot(target.channel_id, target.kind, target.point_id))
             },
             Some(ResolvedAlarmTarget::ChannelHealth(_)) | None => Ok(None),
         }
+    }
+
+    fn validated_point_watch_slot(&self, event: PointWatchEvent) -> Option<usize> {
+        if !self.accepts_point_watch_event(event) {
+            return None;
+        }
+        usize::try_from(event.slot_index()).ok()
     }
 }
 
@@ -268,99 +341,153 @@ pub async fn build_shm_alarm_source(
     pool: &SqlitePool,
     config: &AlarmConfig,
 ) -> anyhow::Result<Arc<ShmAlarmValueSource>> {
-    let (point_manifest, health_manifest) = load_sqlite_shm_topology(pool)
+    let snapshot = load_sqlite_live_topology(pool)
         .await
-        .context("load canonical SHM topology for alarm")?
-        .into_manifests();
-    let manifest = Arc::new(point_manifest);
-    let routing = Arc::new(load_alarm_routing(pool).await?);
+        .context("load canonical live topology for alarm")?;
+    let generation = build_alarm_generation(snapshot, config, TopologyOpenMode::Lazy)
+        .context("compose lazy alarm SHM topology")?;
+    Ok(Arc::new(ShmAlarmValueSource {
+        current: ArcSwap::from_pointee(generation),
+    }))
+}
+
+/// Periodically refreshes the alarm's complete SQLite/SHM topology view.
+///
+/// A failed or partially published candidate is logged and retried while the
+/// last coherent generation remains active.
+pub async fn run_alarm_topology_refresh(
+    source: Arc<ShmAlarmValueSource>,
+    pool: SqlitePool,
+    config: AlarmConfig,
+    shutdown: tokio_util::sync::CancellationToken,
+) {
+    let refresh_interval = Duration::from_millis(config.shm_topology_refresh_interval_ms.max(100));
+    let mut ticker = tokio::time::interval(refresh_interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => break,
+            _ = ticker.tick() => {
+                match source.refresh_topology(&pool, &config).await {
+                    Ok(true) => tracing::info!("Alarm live topology generation refreshed"),
+                    Ok(false) => {},
+                    Err(error) => tracing::warn!(
+                        retryable = error.is_retryable(),
+                        "Alarm live topology refresh retained the previous generation: {error}"
+                    ),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TopologyOpenMode {
+    Lazy,
+    ValidatePhysical,
+}
+
+fn build_alarm_generation(
+    snapshot: SqliteLiveTopologySnapshot,
+    config: &AlarmConfig,
+    mode: TopologyOpenMode,
+) -> PortResult<AlarmValueGeneration> {
+    let digest = snapshot.digest();
+    let routing = Arc::new(alarm_routing_from_snapshot(&snapshot));
+    let (point_manifest, health_manifest, _, _) = snapshot.into_parts();
+    let point_manifest = Arc::new(point_manifest);
     let health_manifest = Arc::new(health_manifest);
-    let slot_source = Arc::new(ReconnectingSlotSource::new(
-        ShmClientConfig::new(&config.shm_path, manifest.layout_hash())
-            .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
-            .with_identity_check_interval(Duration::from_millis(
-                config.shm_identity_check_interval_ms,
-            )),
-    ));
-
-    let channel_health = Arc::new(ShmChannelHealthReader::new(
-        ShmClientConfig::new(
-            &config.channel_health_shm_path,
-            health_manifest.layout_hash(),
+    let point_config = shm_client_config(&config.shm_path, point_manifest.layout_hash(), config);
+    let health_config = shm_client_config(
+        &config.channel_health_shm_path,
+        health_manifest.layout_hash(),
+        config,
+    );
+    let topology = Arc::new(match mode {
+        TopologyOpenMode::Lazy => ShmReadTopologyGeneration::new_lazy(
+            point_config,
+            health_config,
+            Arc::clone(&point_manifest),
+            Arc::clone(&health_manifest),
+        )?,
+        TopologyOpenMode::ValidatePhysical => ShmReadTopologyGeneration::open(
+            point_config,
+            health_config,
+            Arc::clone(&point_manifest),
+            Arc::clone(&health_manifest),
         )
-        .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
-        .with_identity_check_interval(Duration::from_millis(config.shm_identity_check_interval_ms)),
-        health_manifest,
-    ));
-
-    Ok(Arc::new(ShmAlarmValueSource::new(
-        slot_source,
-        manifest,
+        .map_err(retryable_topology_transition)?,
+    });
+    let slots: Arc<dyn SlotSource> = topology.point_source().clone();
+    let channel_health: Arc<dyn ChannelHealthSource> = topology.channel_health().clone();
+    Ok(AlarmValueGeneration {
+        slots,
+        manifest: point_manifest,
         routing,
         channel_health,
-    )))
+        topology: Some(topology),
+        digest,
+    })
 }
 
-async fn load_alarm_routing(pool: &SqlitePool) -> anyhow::Result<AlarmRouting> {
-    let measurement_rows: Vec<(i64, i64, String, i64, i64)> = sqlx::query_as(
-        "SELECT instance_id, channel_id, channel_type, channel_point_id, measurement_id \
-         FROM measurement_routing WHERE enabled = TRUE",
-    )
-    .fetch_all(pool)
-    .await
-    .context("load measurement routing for alarm")?;
-    let action_rows: Vec<(i64, i64, String, i64, i64)> = sqlx::query_as(
-        "SELECT instance_id, channel_id, channel_type, channel_point_id, action_id \
-         FROM action_routing WHERE enabled = TRUE",
-    )
-    .fetch_all(pool)
-    .await
-    .context("load action routing for alarm")?;
-
-    let mut measurements = Vec::with_capacity(measurement_rows.len());
-    for (instance_id, channel_id, channel_type, channel_point_id, measurement_id) in
-        measurement_rows
-    {
-        let Some(kind) = parse_channel_kind(&channel_type) else {
-            tracing::warn!(
-                channel_type,
-                "skipping invalid measurement route point type"
-            );
-            continue;
-        };
-        measurements.push((
-            config_u32(instance_id, "measurement instance_id")?,
-            config_u32(measurement_id, "measurement_id")?,
-            ChannelPointRef::new(
-                config_u32(channel_id, "measurement channel_id")?,
-                kind,
-                config_u32(channel_point_id, "measurement channel_point_id")?,
-            ),
-        ));
-    }
-
-    let mut actions = Vec::with_capacity(action_rows.len());
-    for (instance_id, channel_id, channel_type, channel_point_id, action_id) in action_rows {
-        let Some(kind) = parse_channel_kind(&channel_type) else {
-            tracing::warn!(channel_type, "skipping invalid action route point type");
-            continue;
-        };
-        actions.push((
-            config_u32(instance_id, "action instance_id")?,
-            config_u32(action_id, "action_id")?,
-            ChannelPointRef::new(
-                config_u32(channel_id, "action channel_id")?,
-                kind,
-                config_u32(channel_point_id, "action channel_point_id")?,
-            ),
-        ));
-    }
-
-    Ok(AlarmRouting::from_entries(measurements, actions))
+fn physical_layout_matches(
+    current: &AlarmValueGeneration,
+    snapshot: &SqliteLiveTopologySnapshot,
+) -> bool {
+    current.topology.as_ref().is_some_and(|topology| {
+        topology.point_manifest().layout_hash() == snapshot.point_manifest().layout_hash()
+            && topology.point_manifest().slot_count() == snapshot.point_manifest().slot_count()
+            && topology.health_manifest().layout_hash() == snapshot.health_manifest().layout_hash()
+            && topology.health_manifest().slot_count() == snapshot.health_manifest().slot_count()
+    })
 }
 
-fn config_u32(value: i64, label: &str) -> anyhow::Result<u32> {
-    u32::try_from(value).with_context(|| format!("{label} must fit in u32, got {value}"))
+fn alarm_routing_from_snapshot(snapshot: &SqliteLiveTopologySnapshot) -> AlarmRouting {
+    AlarmRouting::from_entries(
+        snapshot
+            .measurement_routes()
+            .map(|(instance_id, point_id, target)| {
+                (
+                    instance_id,
+                    point_id,
+                    ChannelPointRef::new(
+                        target.channel_id().get(),
+                        target.kind(),
+                        target.point_id().get(),
+                    ),
+                )
+            }),
+        snapshot
+            .action_routes()
+            .map(|(instance_id, point_id, target)| {
+                (
+                    instance_id,
+                    point_id,
+                    ChannelPointRef::new(
+                        target.channel_id().get(),
+                        target.kind(),
+                        target.point_id().get(),
+                    ),
+                )
+            }),
+    )
+}
+
+fn shm_client_config(path: &str, layout_hash: u64, config: &AlarmConfig) -> ShmClientConfig {
+    ShmClientConfig::new(path, layout_hash)
+        .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
+        .with_identity_check_interval(Duration::from_millis(config.shm_identity_check_interval_ms))
+}
+
+fn retryable_topology_transition(error: PortError) -> PortError {
+    if error.is_retryable() {
+        return error;
+    }
+    PortError::new(
+        PortErrorKind::Conflict,
+        format!("alarm SHM topology publication is incomplete: {error}"),
+    )
 }
 
 #[cfg(test)]
@@ -370,7 +497,7 @@ mod tests {
 
     use aether_domain::PointKind;
     use aether_ports::{PortError, PortErrorKind, PortResult};
-    use aether_shm_bridge::{ChannelPointManifest, SlotSnapshot, SlotSource};
+    use aether_shm_bridge::{ChannelPointManifest, PointWatchEvent, SlotSnapshot, SlotSource};
 
     use super::{
         AlarmRouting, AlarmValueSource, ChannelPointRef, NoChannelHealth, ShmAlarmValueSource,
@@ -493,6 +620,38 @@ mod tests {
     }
 
     #[test]
+    fn point_watch_hints_are_validated_by_typed_physical_address() {
+        let source = source();
+        let slot = source
+            .watched_slot(&rule("io", 10, "T", 1))
+            .expect("resolve watched slot")
+            .expect("configured slot");
+        let valid = PointWatchEvent::new(
+            10,
+            PointKind::Telemetry,
+            1,
+            u64::try_from(slot).expect("slot fits in wire field"),
+            42.5,
+            42.5,
+            1_000,
+            1,
+        );
+        let stale = PointWatchEvent::new(
+            20,
+            PointKind::Telemetry,
+            0,
+            u64::try_from(slot).expect("slot fits in wire field"),
+            42.5,
+            42.5,
+            1_000,
+            1,
+        );
+
+        assert_eq!(source.validated_point_watch_slot(valid), Some(slot));
+        assert_eq!(source.validated_point_watch_slot(stale), None);
+    }
+
+    #[test]
     fn channel_online_rule_uses_health_port_not_a_fake_slot() {
         let value = source()
             .read_rule(&rule("io", 10, "online", 0))
@@ -558,5 +717,243 @@ mod tests {
             .expect_err("missing writer is a read-time condition");
 
         assert!(error.is_retryable());
+    }
+
+    #[tokio::test]
+    async fn routing_only_refresh_succeeds_while_io_is_offline() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open embedded config database");
+        for statement in [
+            "CREATE TABLE channels (channel_id INTEGER PRIMARY KEY, protocol TEXT NOT NULL)",
+            "CREATE TABLE telemetry_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE signal_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE control_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE adjustment_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE measurement_routing (instance_id INTEGER, channel_id INTEGER, channel_type TEXT, channel_point_id INTEGER, measurement_id INTEGER, enabled BOOLEAN)",
+            "CREATE TABLE action_routing (instance_id INTEGER, channel_id INTEGER, channel_type TEXT, channel_point_id INTEGER, action_id INTEGER, enabled BOOLEAN)",
+            "INSERT INTO channels VALUES (10, 'virtual')",
+            "INSERT INTO telemetry_points VALUES (10, 0)",
+            "INSERT INTO telemetry_points VALUES (10, 1)",
+            "INSERT INTO measurement_routing VALUES (100, 10, 'T', 0, 5, TRUE)",
+        ] {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .expect("create routing-only topology");
+        }
+        let directory = tempfile::tempdir().expect("temporary missing-SHM directory");
+        let config = crate::config::AlarmConfig {
+            shm_path: directory
+                .path()
+                .join("missing-live.shm")
+                .to_string_lossy()
+                .into_owned(),
+            channel_health_shm_path: directory
+                .path()
+                .join("missing-health.shm")
+                .to_string_lossy()
+                .into_owned(),
+            ..Default::default()
+        };
+        let source = super::build_shm_alarm_source(&pool, &config)
+            .await
+            .expect("build offline alarm source");
+        assert_eq!(
+            source
+                .watched_slot(&rule("inst", 100, "M", 5))
+                .expect("initial route"),
+            Some(0)
+        );
+
+        sqlx::query(
+            "UPDATE measurement_routing SET channel_point_id = 1 \
+             WHERE instance_id = 100 AND measurement_id = 5",
+        )
+        .execute(&pool)
+        .await
+        .expect("move logical route without changing the physical layout");
+
+        assert!(source.refresh_topology(&pool, &config).await.unwrap());
+        assert_eq!(
+            source
+                .watched_slot(&rule("inst", 100, "M", 5))
+                .expect("replacement route"),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn production_source_refreshes_point_health_and_routing_as_one_view() {
+        use aether_domain::{
+            AcquiredPointSample, ChannelId, ChannelPointAddress, PointId, PointQuality, TimestampMs,
+        };
+        use aether_shm_bridge::{
+            PointWatchEvent, ShmChannelHealthWriterHandle, ShmRuntimeConfig, ShmWriterHandle,
+        };
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open embedded topology database");
+        for statement in [
+            "CREATE TABLE channels (channel_id INTEGER PRIMARY KEY, protocol TEXT NOT NULL)",
+            "CREATE TABLE telemetry_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE signal_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE control_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE adjustment_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE measurement_routing (instance_id INTEGER, channel_id INTEGER, channel_type TEXT, channel_point_id INTEGER, measurement_id INTEGER, enabled BOOLEAN)",
+            "CREATE TABLE action_routing (instance_id INTEGER, channel_id INTEGER, channel_type TEXT, channel_point_id INTEGER, action_id INTEGER, enabled BOOLEAN)",
+            "INSERT INTO channels VALUES (10, 'virtual')",
+            "INSERT INTO telemetry_points VALUES (10, 0)",
+            "INSERT INTO measurement_routing VALUES (100, 10, 'T', 0, 5, TRUE)",
+        ] {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .expect("create initial topology");
+        }
+        let directory = tempfile::tempdir().expect("temporary SHM directory");
+        let point_path = directory.path().join("live.shm");
+        let health_path = directory.path().join("health.shm");
+        let config = crate::config::AlarmConfig {
+            shm_path: point_path.to_string_lossy().into_owned(),
+            channel_health_shm_path: health_path.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let first = aether_store_local::load_sqlite_live_topology(&pool)
+            .await
+            .expect("initial topology snapshot");
+        let point_writer = ShmWriterHandle::create_published(
+            ShmRuntimeConfig::new(&point_path, 32),
+            Arc::new(first.point_manifest().clone()),
+            None,
+        )
+        .expect("publish initial point plane");
+        let health_writer = ShmChannelHealthWriterHandle::create(
+            &health_path,
+            Arc::new(first.health_manifest().clone()),
+        )
+        .expect("publish initial health plane");
+        let first_timestamp = TimestampMs::new(aether_shm_bridge::timestamp_ms());
+        let first_sample = AcquiredPointSample::new(
+            ChannelPointAddress::new(ChannelId::new(10), PointKind::Telemetry, PointId::new(0))
+                .expect("initial address"),
+            10.0,
+            10.0,
+            first_timestamp,
+            PointQuality::Good,
+        )
+        .expect("initial sample");
+        point_writer
+            .generation()
+            .expect("initial point generation")
+            .acquisition_writer()
+            .commit_batch(&[first_sample])
+            .expect("write initial point");
+        health_writer
+            .set_online(10, true, first_timestamp.get())
+            .expect("write initial health");
+
+        let source = super::build_shm_alarm_source(&pool, &config)
+            .await
+            .expect("build alarm source");
+        assert_eq!(
+            source
+                .read_rule(&rule("inst", 100, "M", 5))
+                .expect("read initial route")
+                .expect("initial sample")
+                .value(),
+            10.0
+        );
+        assert_eq!(
+            source
+                .read_rule(&rule("io", 10, "online", 0))
+                .expect("read initial health")
+                .expect("initial health sample")
+                .value(),
+            1.0
+        );
+        let old_event = PointWatchEvent::new(10, PointKind::Telemetry, 0, 0, 10.0, 10.0, 1_000, 1);
+        assert!(source.accepts_point_watch_event(old_event));
+
+        for statement in [
+            "INSERT INTO channels VALUES (5, 'virtual')",
+            "INSERT INTO telemetry_points VALUES (5, 0)",
+            "UPDATE measurement_routing SET channel_id = 5 WHERE instance_id = 100 AND measurement_id = 5",
+        ] {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .expect("mutate replacement topology");
+        }
+        let second = aether_store_local::load_sqlite_live_topology(&pool)
+            .await
+            .expect("replacement topology snapshot");
+        point_writer
+            .rebuild(Arc::new(second.point_manifest().clone()))
+            .expect("publish replacement point plane");
+
+        let partial_error = source
+            .refresh_topology(&pool, &config)
+            .await
+            .expect_err("point-only publication must retain the old service generation");
+        assert!(partial_error.is_retryable());
+        assert!(source.accepts_point_watch_event(old_event));
+
+        health_writer
+            .rebuild(Arc::new(second.health_manifest().clone()))
+            .expect("publish replacement health plane");
+        let second_timestamp = TimestampMs::new(aether_shm_bridge::timestamp_ms());
+        health_writer
+            .set_online(5, false, second_timestamp.get())
+            .expect("write replacement health");
+        let second_sample = AcquiredPointSample::new(
+            ChannelPointAddress::new(ChannelId::new(5), PointKind::Telemetry, PointId::new(0))
+                .expect("replacement address"),
+            50.0,
+            50.0,
+            second_timestamp,
+            PointQuality::Good,
+        )
+        .expect("replacement sample");
+        point_writer
+            .generation()
+            .expect("replacement point generation")
+            .acquisition_writer()
+            .commit_batch(&[second_sample])
+            .expect("write replacement point");
+
+        assert!(source.refresh_topology(&pool, &config).await.unwrap());
+        assert_eq!(
+            source
+                .read_rule(&rule("inst", 100, "M", 5))
+                .expect("read replacement route")
+                .expect("replacement sample")
+                .value(),
+            50.0
+        );
+        assert_eq!(
+            source
+                .read_rule(&rule("io", 5, "online", 0))
+                .expect("read replacement health")
+                .expect("replacement health sample")
+                .value(),
+            0.0
+        );
+        assert!(!source.accepts_point_watch_event(old_event));
+        assert!(source.accepts_point_watch_event(PointWatchEvent::new(
+            5,
+            PointKind::Telemetry,
+            0,
+            0,
+            50.0,
+            50.0,
+            2_000,
+            1,
+        )));
     }
 }

@@ -9,8 +9,8 @@ use aether_domain::{
     PointSample, TimestampMs,
 };
 use aether_ports::{
-    AuditOutcome, AuditRecord, AuditSink, CommandDispatcher, CommandReceipt, LiveState, PortError,
-    PortErrorKind, PortResult,
+    AuditOutcome, AuditRecord, AuditSink, CommandDispatcher, CommandReceipt, CommandTopologyFence,
+    LiveState, PortError, PortErrorKind, PortResult,
 };
 use async_trait::async_trait;
 
@@ -35,6 +35,7 @@ impl LiveState for StubLiveState {
 #[derive(Default)]
 struct RecordingDispatcher {
     commands: Mutex<Vec<ControlCommand>>,
+    fences: Mutex<Vec<CommandTopologyFence>>,
 }
 
 #[async_trait]
@@ -45,6 +46,15 @@ impl CommandDispatcher for RecordingDispatcher {
             command.id(),
             TimestampMs::new(command.issued_at().get() + 1),
         ))
+    }
+
+    async fn dispatch_fenced(
+        &self,
+        command: ControlCommand,
+        fence: CommandTopologyFence,
+    ) -> PortResult<CommandReceipt> {
+        self.fences.lock().unwrap().push(fence);
+        self.dispatch(command).await
     }
 }
 
@@ -250,6 +260,38 @@ async fn confirmed_control_is_audited_before_and_after_dispatch() {
         outcomes,
         vec![AuditOutcome::Attempted, AuditOutcome::Succeeded]
     );
+}
+
+#[tokio::test]
+async fn generation_fenced_control_uses_the_fenced_dispatch_port_and_audits_sequence() {
+    let dispatcher = Arc::new(RecordingDispatcher::default());
+    let audit = Arc::new(RecordingAudit::default());
+    let application = control_application(Arc::clone(&dispatcher), Arc::clone(&audit));
+    let fence = CommandTopologyFence::new(73);
+
+    application
+        .write_point_fenced(
+            &context(
+                Actor::new("local:rule").with_permission("device.control"),
+                true,
+            ),
+            CommandId::new(0x73),
+            action_address(),
+            31.0,
+            fence,
+        )
+        .await
+        .expect("matching generation is delegated to the fenced dispatcher path");
+
+    assert_eq!(*dispatcher.fences.lock().unwrap(), vec![fence]);
+    assert_eq!(dispatcher.commands.lock().unwrap().len(), 1);
+    let records = audit.records.lock().unwrap();
+    assert_eq!(records.len(), 2);
+    assert!(records.iter().all(|record| {
+        record
+            .detail()
+            .is_some_and(|detail| detail.contains("expected_topology_sequence=73"))
+    }));
 }
 
 #[tokio::test]

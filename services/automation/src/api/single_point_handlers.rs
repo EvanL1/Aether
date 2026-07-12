@@ -295,7 +295,7 @@ pub async fn get_action_point(
         description = "Governed action-route upsert or unbind; confirmed=true is required"
     ),
     responses(
-        (status = 200, description = "Action-routing mutation accepted. If audit.status=incomplete, retryable=false and the mutation must not be retried.", body = crate::dto::ActionRoutingMutationResponse,
+        (status = 200, description = "Action-routing mutation accepted. If audit.status=incomplete or runtime.status=commands_revoked, retryable=false and the mutation must not be retried.", body = crate::dto::ActionRoutingMutationResponse,
             example = json!({
                 "success": true,
                 "data": {
@@ -304,6 +304,7 @@ pub async fn get_action_point(
                     "operation": "upsert",
                     "affected_routes": 1,
                     "audit": {"status": "recorded", "retryable": false},
+                    "runtime": {"status": "published", "reconciliation_required": false},
                     "retryable": false
                 }
             })
@@ -312,7 +313,7 @@ pub async fn get_action_point(
         (status = 403, description = "Missing/invalid Bearer credentials or actor lacks automation.routing.manage"),
         (status = 404, description = "Instance not found"),
         (status = 422, description = "Explicit confirmation is required"),
-        (status = 503, description = "Mandatory audit, routing storage, or cache publication is unavailable")
+        (status = 503, description = "Mandatory attempted audit or pre-commit routing storage is unavailable")
     ),
     security(("bearer_auth" = [])),
     tag = "automation"
@@ -354,7 +355,7 @@ pub async fn upsert_action_routing(
         description = "Governed action-route deletion; confirmed=true is required"
     ),
     responses(
-        (status = 200, description = "Action-routing mutation accepted. If audit.status=incomplete, retryable=false and the mutation must not be retried.", body = crate::dto::ActionRoutingMutationResponse,
+        (status = 200, description = "Action-routing mutation accepted. If audit.status=incomplete or runtime.status=commands_revoked, retryable=false and the mutation must not be retried.", body = crate::dto::ActionRoutingMutationResponse,
             example = json!({
                 "success": true,
                 "data": {
@@ -363,6 +364,7 @@ pub async fn upsert_action_routing(
                     "operation": "delete",
                     "affected_routes": 1,
                     "audit": {"status": "recorded", "retryable": false},
+                    "runtime": {"status": "published", "reconciliation_required": false},
                     "retryable": false
                 }
             })
@@ -370,7 +372,7 @@ pub async fn upsert_action_routing(
         (status = 403, description = "Missing/invalid Bearer credentials or actor lacks automation.routing.manage"),
         (status = 404, description = "Instance or routing not found"),
         (status = 422, description = "Explicit confirmation is required"),
-        (status = 503, description = "Mandatory audit, routing storage, or cache publication is unavailable")
+        (status = 503, description = "Mandatory attempted audit or pre-commit routing storage is unavailable")
     ),
     security(("bearer_auth" = [])),
     tag = "automation"
@@ -415,7 +417,7 @@ pub async fn delete_action_routing(
         description = "Governed action-route enable/disable; confirmed=true is required"
     ),
     responses(
-        (status = 200, description = "Action-routing mutation accepted. If audit.status=incomplete, retryable=false and the mutation must not be retried.", body = crate::dto::ActionRoutingMutationResponse,
+        (status = 200, description = "Action-routing mutation accepted. If audit.status=incomplete or runtime.status=commands_revoked, retryable=false and the mutation must not be retried.", body = crate::dto::ActionRoutingMutationResponse,
             example = json!({
                 "success": true,
                 "data": {
@@ -424,6 +426,7 @@ pub async fn delete_action_routing(
                     "operation": "enable",
                     "affected_routes": 1,
                     "audit": {"status": "recorded", "retryable": false},
+                    "runtime": {"status": "published", "reconciliation_required": false},
                     "retryable": false
                 }
             })
@@ -431,7 +434,7 @@ pub async fn delete_action_routing(
         (status = 403, description = "Missing/invalid Bearer credentials or actor lacks automation.routing.manage"),
         (status = 404, description = "Instance or routing not found"),
         (status = 422, description = "Explicit confirmation is required"),
-        (status = 503, description = "Mandatory audit, routing storage, or cache publication is unavailable")
+        (status = 503, description = "Mandatory attempted audit or pre-commit routing storage is unavailable")
     ),
     security(("bearer_auth" = [])),
     tag = "automation"

@@ -21,7 +21,7 @@ pub use core::reader::SlotReader;
 pub use core::slot::PointSlot;
 pub use core::slot_io::{SlotIo, SlotIoWrite, SlotRead};
 pub use core::snapshot_load::SnapshotImage;
-pub use core::writer::SlotWriter;
+pub use core::writer::{GenerationInvalidation, SlotWriter};
 pub use watch_bitmap::{
     SubscriptionBitmap, WATCH_BITMAP_SIZE, WATCH_BITMAP_SUFFIX, WATCH_WORDS_COUNT,
     automation_bitmap_path_from_shm, bitmap_path_for_consumer,

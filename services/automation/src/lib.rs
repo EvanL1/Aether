@@ -39,6 +39,7 @@ pub mod infra {
     pub mod channel_health;
     pub mod rule_live_state;
     pub mod rule_mutation;
+    pub mod runtime_topology;
     pub mod shm_manifest;
 }
 pub mod runtime {

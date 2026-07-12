@@ -6,7 +6,7 @@
 //! 3. Executing actions and following wires
 
 use crate::error::Result;
-use crate::live_state::RuleLiveState;
+use crate::live_state::{RuleExecutionContext, RuleLiveState};
 use crate::logger::format_conditions;
 use crate::types::{
     CalculationRule, FlowCondition, Rule, RuleNode, RuleSwitchBranch, RuleValueAssignment,
@@ -319,6 +319,10 @@ impl<S: StateStore> RuleExecutor<S> {
 
     /// Execute a rule with RuleFlow
     pub async fn execute(&self, rule: &Rule) -> Result<RuleExecutionResult> {
+        // Capture once, before any rule input is read. Topology-aware live-state
+        // adapters validate every read against this context, and every derived
+        // command carries its fence to the dispatcher.
+        let execution = self.live_state.begin_execution();
         let mut result = RuleExecutionResult {
             rule_id: rule.id,
             success: false,
@@ -404,7 +408,10 @@ impl<S: StateStore> RuleExecutor<S> {
                     // Read node-local variables. Missing variables → skip this
                     // cycle so absent data can never trigger threshold rules
                     // (a 0.0 fallback would fire "X1 < 5" on missing readings).
-                    let outcome = match self.read_rule_variables(variables, &mut values).await {
+                    let outcome = match self
+                        .read_rule_variables_for_execution(execution, variables, &mut values)
+                        .await
+                    {
                         Ok(o) => o,
                         Err(e) => {
                             result.error = Some(format!("Failed to read variables: {}", e));
@@ -464,7 +471,10 @@ impl<S: StateStore> RuleExecutor<S> {
                 } => {
                     // Read target variables. Skip the cycle on missing data —
                     // a 0.0 fallback would write meaningless action values.
-                    let outcome = match self.read_rule_variables(variables, &mut values).await {
+                    let outcome = match self
+                        .read_rule_variables_for_execution(execution, variables, &mut values)
+                        .await
+                    {
                         Ok(o) => o,
                         Err(e) => {
                             result.error = Some(format!("Failed to read variables: {}", e));
@@ -491,7 +501,11 @@ impl<S: StateStore> RuleExecutor<S> {
                     for assignment in assignments {
                         let variable = variables.iter().find(|v| v.name == assignment.variables);
                         if let Some(var) = variable {
-                            let executed = self.execute_rule_change(var, assignment, &values).await;
+                            let executed = self
+                                .execute_rule_change_for_execution(
+                                    execution, var, assignment, &values,
+                                )
+                                .await;
                             node_actions.push(executed);
                             result.actions_executed.push(executed);
                         }
@@ -532,6 +546,7 @@ impl<S: StateStore> RuleExecutor<S> {
                         &mut values_snapshot,
                         &mut result,
                         rule.id,
+                        execution,
                     )
                     .await
                 {
@@ -555,6 +570,7 @@ impl<S: StateStore> RuleExecutor<S> {
                         &mut values_snapshot,
                         &mut result,
                         rule.id,
+                        execution,
                     )
                     .await
                 {
@@ -580,8 +596,12 @@ impl<S: StateStore> RuleExecutor<S> {
         snapshot_cache: &mut Option<Arc<HashMap<String, f64>>>,
         result: &mut RuleExecutionResult,
         rule_id: i64,
+        execution: RuleExecutionContext,
     ) -> Option<&'a str> {
-        let outcome = match self.read_rule_variables(variables, values).await {
+        let outcome = match self
+            .read_rule_variables_for_execution(execution, variables, values)
+            .await
+        {
             Ok(o) => o,
             Err(e) => {
                 result.error = Some(format!("Failed to read variables: {}", e));
@@ -615,7 +635,9 @@ impl<S: StateStore> RuleExecutor<S> {
             };
 
             if let Some(var) = variables.iter().find(|v| v.name == calc.output) {
-                let action = self.write_calculation_result(var, calc_result, calc).await;
+                let action = self
+                    .write_calculation_result(execution, var, calc_result, calc)
+                    .await;
                 node_actions.push(action);
                 result.actions_executed.push(action);
             }
@@ -658,9 +680,13 @@ impl<S: StateStore> RuleExecutor<S> {
         snapshot_cache: &mut Option<Arc<HashMap<String, f64>>>,
         result: &mut RuleExecutionResult,
         rule_id: i64,
+        execution: RuleExecutionContext,
     ) -> Option<&'a str> {
         let input_vars = vec![input.clone()];
-        let outcome = match self.read_rule_variables(&input_vars, values).await {
+        let outcome = match self
+            .read_rule_variables_for_execution(execution, &input_vars, values)
+            .await
+        {
             Ok(o) => o,
             Err(e) => {
                 result.error = Some(format!("Failed to read input variable: {}", e));
@@ -718,7 +744,9 @@ impl<S: StateStore> RuleExecutor<S> {
             },
         };
 
-        let action = self.write_period_delta_result(output, delta, period).await;
+        let action = self
+            .write_period_delta_result(execution, output, delta, period)
+            .await;
         result.actions_executed.push(action);
 
         values.insert(output.name.clone(), delta);
@@ -749,8 +777,19 @@ impl<S: StateStore> RuleExecutor<S> {
     /// Production supplies a SHM-backed implementation. A missing or
     /// non-finite Measurement makes the rule ineligible for this cycle;
     /// an unwritten Action target remains optional because rules may write it.
+    #[cfg(test)]
     async fn read_rule_variables(
         &self,
+        variables: &[RuleVariable],
+        values: &mut HashMap<String, f64>,
+    ) -> Result<RuleReadOutcome> {
+        self.read_rule_variables_for_execution(self.live_state.begin_execution(), variables, values)
+            .await
+    }
+
+    async fn read_rule_variables_for_execution(
+        &self,
+        execution: RuleExecutionContext,
         variables: &[RuleVariable],
         values: &mut HashMap<String, f64>,
     ) -> Result<RuleReadOutcome> {
@@ -785,10 +824,12 @@ impl<S: StateStore> RuleExecutor<S> {
 
             let is_action = point_type == "action";
             let instance_type = u8::from(is_action);
-            match self
-                .live_state
-                .get_instance(instance_id, instance_type, point)
-            {
+            match self.live_state.get_instance_for_execution(
+                execution,
+                instance_id,
+                instance_type,
+                point,
+            ) {
                 Some((value, _timestamp_ms)) if value.is_finite() => {
                     let point_key = format!(
                         "{}:{}:{}",
@@ -1004,8 +1045,25 @@ impl<S: StateStore> RuleExecutor<S> {
     }
 
     /// Execute a compact value change action
+    #[cfg(test)]
     async fn execute_rule_change(
         &self,
+        variable: &RuleVariable,
+        assignment: &RuleValueAssignment,
+        values: &HashMap<String, f64>,
+    ) -> ActionResult {
+        self.execute_rule_change_for_execution(
+            self.live_state.begin_execution(),
+            variable,
+            assignment,
+            values,
+        )
+        .await
+    }
+
+    async fn execute_rule_change_for_execution(
+        &self,
+        execution: RuleExecutionContext,
         variable: &RuleVariable,
         assignment: &RuleValueAssignment,
         values: &HashMap<String, f64>,
@@ -1044,13 +1102,14 @@ impl<S: StateStore> RuleExecutor<S> {
                 Ok(v) => v,
                 Err(action) => return action,
             };
-        self.write_to_point(instance_id, point, value, pt, "Rule action")
+        self.write_to_point(execution, instance_id, point, value, pt, "Rule action")
             .await
     }
 
     /// Write a validated value to the appropriate point (M or A) and build ActionResult
     async fn write_to_point(
         &self,
+        execution: RuleExecutionContext,
         instance_id: u32,
         point: u32,
         value: f64,
@@ -1063,7 +1122,7 @@ impl<S: StateStore> RuleExecutor<S> {
                 .await
                 .is_ok(),
             "A" => {
-                self.write_action_point(instance_id, point, value, context)
+                self.write_action_point(execution, instance_id, point, value, context)
                     .await
             },
             _ => {
@@ -1084,6 +1143,7 @@ impl<S: StateStore> RuleExecutor<S> {
 
     async fn write_action_point(
         &self,
+        execution: RuleExecutionContext,
         instance_id: u32,
         point: u32,
         value: f64,
@@ -1098,8 +1158,11 @@ impl<S: StateStore> RuleExecutor<S> {
             );
             return false;
         };
-        let command =
+        let mut command =
             RuleActionCommand::new(InstanceId::new(instance_id), PointId::new(point), value);
+        if let Some(fence) = execution.command_topology_fence() {
+            command = command.with_topology_fence(fence);
+        }
         match commands.write_action(command).await {
             Ok(_) => true,
             Err(error) => {
@@ -1118,6 +1181,7 @@ impl<S: StateStore> RuleExecutor<S> {
     /// Write calculation result to instance point (M or A)
     async fn write_calculation_result(
         &self,
+        execution: RuleExecutionContext,
         variable: &RuleVariable,
         raw_value: f64,
         calc: &CalculationRule,
@@ -1132,6 +1196,7 @@ impl<S: StateStore> RuleExecutor<S> {
             Err(action) => return action,
         };
         self.write_to_point(
+            execution,
             instance_id,
             point,
             value,
@@ -1144,6 +1209,7 @@ impl<S: StateStore> RuleExecutor<S> {
     /// Write period delta result to instance point (always measurement type)
     async fn write_period_delta_result(
         &self,
+        execution: RuleExecutionContext,
         variable: &RuleVariable,
         raw_value: f64,
         period: &str,
@@ -1165,6 +1231,7 @@ impl<S: StateStore> RuleExecutor<S> {
             period
         );
         self.write_to_point(
+            execution,
             instance_id,
             point,
             value,

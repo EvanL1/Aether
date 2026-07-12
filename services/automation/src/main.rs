@@ -14,7 +14,9 @@ use utoipa_swagger_ui::SwaggerUi;
 
 // aether-automation imports
 use aether_automation::infra::{
-    application_control::RuleActionApplication, rule_live_state::ShmRuleLiveState,
+    application_control::RuleActionApplication,
+    rule_live_state::ShmRuleLiveState,
+    runtime_topology::{AutomationTopologyHandle, PointWatchReadiness},
 };
 #[cfg(feature = "swagger-ui")]
 use aether_automation::rule_routes::RuleApiDoc;
@@ -25,9 +27,8 @@ use aether_automation::{
 use aether_calc::MemoryStateStore;
 use aether_rules::{PointWatchDispatcher, PointWatchHint, WatchEvent};
 use aether_shm_bridge::{
-    PointWatchEvent, PointWatchEventListener, ShmChannelReader, ShmChannelReaderHandle,
-    SubscriptionBitmap, automation_bitmap_path_from_shm, default_shm_path,
-    point_watch_socket_from_shm,
+    PointWatchEvent, PointWatchEventListener, SubscriptionBitmap, automation_bitmap_path_from_shm,
+    channel_health_path_from_shm, default_shm_path, point_watch_socket_from_shm,
 };
 
 #[tokio::main]
@@ -80,97 +81,51 @@ async fn main() -> Result<()> {
     let shm_path = default_shm_path();
     debug!("SHM path: {}", shm_path.display());
 
-    let topology = aether_store_local::load_sqlite_shm_topology(&sqlite_pool)
+    let topology_snapshot = aether_store_local::load_sqlite_live_topology(&sqlite_pool)
         .await
         .map_err(|error| {
             AutomationError::DispatchDegraded(format!(
-                "failed to load the canonical SHM topology from SQLite: {error}"
+                "failed to load the canonical runtime topology from SQLite: {error}"
             ))
         })?;
-    let (point_manifest, health_manifest) = topology.into_manifests();
-    let channel_health_reader = aether_automation::infra::channel_health::build_reader(
-        Arc::new(health_manifest),
-        &shm_path,
+    let health_path = std::env::var("AETHER_CHANNEL_HEALTH_SHM_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| channel_health_path_from_shm(&shm_path));
+    let runtime_topology = Arc::new(
+        AutomationTopologyHandle::new_lazy(
+            shm_path.clone(),
+            health_path,
+            topology_snapshot,
+            Arc::clone(&state.shm_dispatch),
+            Arc::clone(&routing_cache),
+        )
+        .map_err(|error| {
+            AutomationError::DispatchDegraded(format!(
+                "failed to compose the automation runtime topology: {error}"
+            ))
+        })?,
     );
     state
         .instance_manager
-        .set_channel_health_reader(Arc::new(channel_health_reader));
-    info!("Channel-health SHM reader configured");
-
-    let command_manifest = Arc::new(point_manifest);
-
-    // Initialize UnifiedReader for cross-process zero-copy reads
-    // Simplified: Header + PointSlots only, indexes built from channel points
-    // Added retry mechanism for cold start race condition
-    let shared_reader = {
-        const MAX_RETRIES: u32 = 10;
-        const BASE_DELAY_MS: u64 = 1000;
-        const MAX_DELAY_MS: u64 = 15000;
-        let mut retry_count = 0;
-
-        loop {
-            if shm_path.exists() {
-                match ShmChannelReader::open(&shm_path, Arc::clone(&command_manifest)) {
-                    Ok(reader) => {
-                        info!(
-                            "Typed SHM reader opened: {} slots, {} channels",
-                            reader.slot_count(),
-                            reader.channel_ids().count()
-                        );
-                        break Arc::new(ShmChannelReaderHandle::new(Arc::new(reader)));
-                    },
-                    Err(e) if retry_count < MAX_RETRIES => {
-                        let delay_ms = (BASE_DELAY_MS * 2u64.pow(retry_count)).min(MAX_DELAY_MS);
-                        info!(
-                            "SharedMemory not ready (retry {}/{}, next in {}ms): {}",
-                            retry_count + 1,
-                            MAX_RETRIES,
-                            delay_ms,
-                            e
-                        );
-                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                        retry_count += 1;
-                    },
-                    Err(e) => {
-                        return Err(AutomationError::DispatchDegraded(format!(
-                            "typed SHM reader unavailable after {MAX_RETRIES} retries: {e}"
-                        )));
-                    },
-                }
-            } else if retry_count < MAX_RETRIES {
-                let delay_ms = (BASE_DELAY_MS * 2u64.pow(retry_count)).min(MAX_DELAY_MS);
-                info!(
-                    "SharedMemory path not found (retry {}/{}, next in {}ms), waiting for io...",
-                    retry_count + 1,
-                    MAX_RETRIES,
-                    delay_ms
-                );
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                retry_count += 1;
-            } else {
-                return Err(AutomationError::DispatchDegraded(format!(
-                    "shared-memory segment unavailable after {MAX_RETRIES} retries"
-                )));
-            }
-        }
-    };
-
-    state
-        .instance_manager
-        .set_live_reader(Arc::clone(&shared_reader));
-
-    // Publish one coherent typed manifest/writer generation. The sink accepts
-    // only domain-level C/A addresses, so IO's acquisition-owned T/S slots are
-    // not representable at this boundary.
-    state
-        .shm_dispatch
-        .open_generation(&shm_path, Arc::clone(&command_manifest))
+        .set_runtime_topology(Arc::clone(&runtime_topology))
         .map_err(|error| {
             AutomationError::DispatchDegraded(format!(
-                "failed to open the typed SHM command generation: {error}"
+                "failed to install the automation runtime topology: {error}"
             ))
         })?;
-    info!("Typed SHM command generation configured");
+    match runtime_topology.refresh(&sqlite_pool).await {
+        Ok(_) => info!("Coherent point/health/routing topology configured"),
+        Err(error) => warn!(
+            "IO runtime topology is not ready; automation started in fail-closed degraded mode: {error}"
+        ),
+    }
+    let topology_refresh_interval = Duration::from_millis(
+        std::env::var("SHM_TOPOLOGY_REFRESH_INTERVAL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(1_000)
+            .max(100),
+    );
 
     // UDS notification is self-healing. A command receipt is returned only
     // after the complete command event has been written to this transport;
@@ -188,16 +143,13 @@ async fn main() -> Result<()> {
         })?;
     info!("Typed command notifier configured for {m2c_socket}; reconnect is automatic");
 
-    // Spawn SHM writer auto-rebuild task.
-    // When dispatch() detects a generation mismatch (io restarted), it fires
-    // rebuild_trigger. This task re-opens the writer with exponential backoff,
-    // restoring M2C dispatch without a automation restart.
+    // A stale command writer requests a bounded refresh of the complete
+    // point/health/routing generation. Partial IO publication keeps the prior
+    // service generation and is retried.
     {
         let rebuild_notify = state.shm_dispatch.rebuild_trigger();
-        let rebuild_dispatch = Arc::clone(&state.shm_dispatch);
         let rebuild_pool = sqlite_pool.clone();
-        let rebuild_shm_path = shm_path.clone();
-        let rebuild_reader = shared_reader.clone();
+        let rebuild_topology = Arc::clone(&runtime_topology);
         let rebuild_token = shutdown_token.clone();
         tokio::spawn(async move {
             loop {
@@ -205,79 +157,21 @@ async fn main() -> Result<()> {
                     _ = rebuild_notify.notified() => {},
                     _ = rebuild_token.cancelled() => break,
                 }
-                info!("SHM rebuild triggered — attempting to reopen writer...");
+                info!("SHM rebuild triggered — refreshing the complete automation topology...");
                 const MAX_RETRIES: u32 = 10;
                 const BASE_DELAY_MS: u64 = 1000;
                 const MAX_DELAY_MS: u64 = 15000;
                 let mut retry_count = 0u32;
                 let ok = loop {
-                    // Reload channel points (layout may have changed)
-                    let manifest =
-                        match aether_automation::infra::shm_manifest::load_channel_point_manifest(
-                            &rebuild_pool,
-                        )
-                        .await
-                        {
-                            Ok(manifest) => Arc::new(manifest),
-                            Err(e) if retry_count < MAX_RETRIES => {
-                                let delay =
-                                    (BASE_DELAY_MS * 2u64.pow(retry_count)).min(MAX_DELAY_MS);
-                                info!(
-                                    "SHM layout reload retry {}/{} in {}ms: {}",
-                                    retry_count + 1,
-                                    MAX_RETRIES,
-                                    delay,
-                                    e
-                                );
-                                tokio::time::sleep(Duration::from_millis(delay)).await;
-                                retry_count += 1;
-                                continue;
-                            },
-                            Err(e) => {
-                                warn!(
-                                    "SHM layout reload failed after {} retries: {}",
-                                    MAX_RETRIES, e
-                                );
-                                break false;
-                            },
-                        };
-                    let reader =
-                        match ShmChannelReader::open(&rebuild_shm_path, Arc::clone(&manifest)) {
-                            Ok(reader) => reader,
-                            Err(e) if retry_count < MAX_RETRIES => {
-                                let delay =
-                                    (BASE_DELAY_MS * 2u64.pow(retry_count)).min(MAX_DELAY_MS);
-                                info!(
-                                    "SHM reader rebuild retry {}/{} in {}ms: {}",
-                                    retry_count + 1,
-                                    MAX_RETRIES,
-                                    delay,
-                                    e
-                                );
-                                tokio::time::sleep(Duration::from_millis(delay)).await;
-                                retry_count += 1;
-                                continue;
-                            },
-                            Err(e) => {
-                                warn!(
-                                    "SHM reader rebuild failed after {} retries: {}",
-                                    MAX_RETRIES, e
-                                );
-                                break false;
-                            },
-                        };
-                    match rebuild_dispatch.open_generation(&rebuild_shm_path, manifest) {
-                        Ok(()) => {
-                            rebuild_reader.replace(Arc::new(reader));
-                            info!(
-                                "SHM rebuild: typed command writer and rule reader restored successfully"
-                            );
+                    match rebuild_topology.refresh(&rebuild_pool).await {
+                        Ok(_) => {
+                            info!("Complete automation topology restored successfully");
                             break true;
                         },
                         Err(e) if retry_count < MAX_RETRIES => {
                             let delay = (BASE_DELAY_MS * 2u64.pow(retry_count)).min(MAX_DELAY_MS);
                             info!(
-                                "SHM command generation retry {}/{} in {}ms: {}",
+                                "Automation topology refresh retry {}/{} in {}ms: {}",
                                 retry_count + 1,
                                 MAX_RETRIES,
                                 delay,
@@ -288,7 +182,7 @@ async fn main() -> Result<()> {
                         },
                         Err(e) => {
                             warn!(
-                                "SHM command generation failed after {} retries: {}. \
+                                "Automation topology refresh failed after {} retries: {}. \
                                  A later unavailable command will start a new bounded cycle.",
                                 MAX_RETRIES, e
                             );
@@ -413,8 +307,8 @@ async fn main() -> Result<()> {
     .unwrap_or(4);
 
     // ── PointWatch bootstrap (automation side) ──────────────────────────────────────
-    // The primary SHM reader is a startup requirement. PointWatch remains an
-    // optional latency optimization and may fall back to scheduler ticks.
+    // PointWatch is an optional latency optimization and may fall back to
+    // scheduler ticks while the offline-first SHM topology reconnects.
     //
     // 1. Open the SubscriptionBitmap created by io (automation writes bits,
     //    io reads them in the hot path).
@@ -493,10 +387,9 @@ async fn main() -> Result<()> {
     // Stateful calculation memory is intentionally process-local for now.
     let rule_log_root = PathBuf::from("logs/automation");
     let state_store = Arc::new(MemoryStateStore::new());
-    let rule_live_state = Arc::new(ShmRuleLiveState::new(
-        Arc::clone(&shared_reader),
-        Arc::clone(&routing_cache),
-    ));
+    let rule_live_state = Arc::new(ShmRuleLiveState::from_topology(Arc::clone(
+        &runtime_topology,
+    )));
     let rule_action_application = Arc::new(RuleActionApplication::new(Arc::clone(
         &state.control_application,
     )));
@@ -545,6 +438,9 @@ async fn main() -> Result<()> {
     }
 
     let scheduler = Arc::new(scheduler);
+    // A PointWatch hint is dispatched only after the subscription index has
+    // been rebuilt for this exact automation topology sequence.
+    let point_watch_readiness = Arc::new(PointWatchReadiness::new());
 
     info!(
         "Rule scheduler: tick_ms={}, max_concurrency={}",
@@ -555,9 +451,108 @@ async fn main() -> Result<()> {
     // above). reload_rules calls load_rules internally and then rebuilds the
     // SubscriptionBitmap + dispatcher index in a single lock-correct path,
     // so this also doubles as the initial PointWatch bootstrap.
+    let initial_rebuild = point_watch_readiness.lock_rebuild().await;
+    let initial_subscription_view = Arc::clone(&runtime_topology).pin_command().await;
+    point_watch_readiness.mark_unready();
     match scheduler.reload_rules().await {
-        Ok(count) => info!("Rule Engine: loaded {} rules", count),
+        Ok(count) => {
+            let generation = initial_subscription_view.generation();
+            let manifest_matches = pw_manifest_source.load().is_some_and(|manifest| {
+                manifest.layout_hash() == generation.point_manifest().layout_hash()
+                    && manifest.slot_count() == generation.point_manifest().slot_count()
+            });
+            if manifest_matches {
+                point_watch_readiness.mark_ready(generation.sequence());
+            }
+            info!("Rule Engine: loaded {} rules", count);
+        },
         Err(e) => warn!("Rule Engine: failed to load rules: {}", e),
+    }
+    drop(initial_subscription_view);
+    drop(initial_rebuild);
+
+    // Refresh the full SQLite + point/health topology periodically. A failed
+    // candidate is transient and leaves the current generation untouched.
+    {
+        let refresh_topology = Arc::clone(&runtime_topology);
+        let refresh_pool = sqlite_pool.clone();
+        let refresh_token = shutdown_token.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(topology_refresh_interval);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // Startup already attempted one refresh; avoid an immediate duplicate tick.
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(error) = refresh_topology.refresh(&refresh_pool).await {
+                            if error.is_retryable() {
+                                debug!("Automation topology refresh deferred: {error}");
+                            } else {
+                                warn!("Automation topology refresh rejected: {error}");
+                            }
+                        }
+                    },
+                    _ = refresh_token.cancelled() => break,
+                }
+            }
+        });
+    }
+
+    // Every successful topology replacement rebuilds PointWatch routing and
+    // bitmap subscriptions from the newly-published compatibility view.
+    {
+        let mut changes = runtime_topology.subscribe();
+        let subscription_scheduler = Arc::clone(&scheduler);
+        let subscription_topology = Arc::clone(&runtime_topology);
+        let subscription_manifest = pw_manifest_source.clone();
+        let subscription_ready = Arc::clone(&point_watch_readiness);
+        let subscription_token = shutdown_token.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    changed = changes.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                        let _rebuild = subscription_ready.lock_rebuild().await;
+                        let view = Arc::clone(&subscription_topology).pin_command().await;
+                        subscription_ready.mark_unready();
+                        match subscription_scheduler.reload_rules().await {
+                            Ok(count) => {
+                                let generation = view.generation();
+                                let manifest_matches = subscription_manifest
+                                    .load()
+                                    .is_some_and(|manifest| {
+                                        manifest.layout_hash()
+                                            == generation.point_manifest().layout_hash()
+                                            && manifest.slot_count()
+                                                == generation.point_manifest().slot_count()
+                                    });
+                                if manifest_matches {
+                                    subscription_ready.mark_ready(generation.sequence());
+                                    info!(
+                                        "PointWatch subscriptions refreshed for topology sequence {} ({} rules)",
+                                        generation.sequence(),
+                                        count
+                                    );
+                                } else {
+                                    warn!(
+                                        "PointWatch subscriptions remain gated: command manifest is not ready for topology sequence {}",
+                                        generation.sequence()
+                                    );
+                                }
+                            },
+                            Err(error) => warn!(
+                                "PointWatch subscription refresh failed; scheduler tick fallback remains active: {error}"
+                            ),
+                        }
+                        drop(view);
+                    },
+                    _ = subscription_token.cancelled() => break,
+                }
+            }
+        });
     }
 
     // Spawn the PointWatch bridge task if PointWatch is enabled. The
@@ -571,6 +566,8 @@ async fn main() -> Result<()> {
         // dispatcher_arc is shared with scheduler.reload_rules — the lock is
         // held briefly (just for the try_send hash lookup, no .await inside).
         let dispatcher_for_bridge = Arc::clone(&dispatcher_arc);
+        let topology_for_bridge = Arc::clone(&runtime_topology);
+        let ready_for_bridge = Arc::clone(&point_watch_readiness);
         let shutdown_token_bridge = shutdown_token.clone();
         tokio::spawn(async move {
             loop {
@@ -578,6 +575,11 @@ async fn main() -> Result<()> {
                     ev = event_rx.recv() => {
                         match ev {
                             Some(e) => {
+                                let view = Arc::clone(&topology_for_bridge).pin_command().await;
+                                if !ready_for_bridge.accepts(view.generation(), e)
+                                {
+                                    continue;
+                                }
                                 // Recover from mutex poison: prior panic in another
                                 // thread doesn't invalidate the dispatcher state.
                                 let d = dispatcher_for_bridge
@@ -616,6 +618,11 @@ async fn main() -> Result<()> {
         aether_automation::infra::rule_mutation::SqliteRuleMutator::new(
             sqlite_pool.clone(),
             Arc::clone(&scheduler),
+        )
+        .with_topology_guard(
+            Arc::clone(&runtime_topology),
+            Arc::clone(&point_watch_readiness),
+            pw_manifest_source,
         ),
     );
     let rule_mutation_application = Arc::new(aether_application::RuleMutationApplication::new(

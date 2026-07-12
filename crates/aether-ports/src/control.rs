@@ -3,7 +3,31 @@
 use aether_domain::{CommandId, ControlCommand, PhysicalDeviceCommand, TimestampMs};
 use async_trait::async_trait;
 
-use crate::PortResult;
+use crate::{PortError, PortErrorKind, PortResult};
+
+/// Expected service-local topology publication for one derived command.
+///
+/// The token is deliberately opaque to the rule engine. A dispatcher that owns
+/// the corresponding runtime topology must compare it after pinning its command
+/// generation and before resolving or sending the physical command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CommandTopologyFence {
+    expected_sequence: u64,
+}
+
+impl CommandTopologyFence {
+    /// Creates a fence from the publication sequence captured before evaluation.
+    #[must_use]
+    pub const fn new(expected_sequence: u64) -> Self {
+        Self { expected_sequence }
+    }
+
+    /// Returns the exact publication sequence required by the derived command.
+    #[must_use]
+    pub const fn expected_sequence(self) -> u64 {
+        self.expected_sequence
+    }
+}
 
 /// Acceptance information from the local command plane.
 ///
@@ -45,6 +69,23 @@ impl CommandReceipt {
 pub trait CommandDispatcher: Send + Sync + 'static {
     /// Dispatches a command or reports a typed recoverable/permanent failure.
     async fn dispatch(&self, command: ControlCommand) -> PortResult<CommandReceipt>;
+
+    /// Dispatches a command only if the dispatcher can pin the expected topology.
+    ///
+    /// Existing manual command adapters remain source-compatible through
+    /// [`Self::dispatch`]. The default fails closed so a derived rule command can
+    /// never silently lose its generation fence when composed with an adapter
+    /// that has not implemented this stronger contract.
+    async fn dispatch_fenced(
+        &self,
+        _command: ControlCommand,
+        _fence: CommandTopologyFence,
+    ) -> PortResult<CommandReceipt> {
+        Err(PortError::new(
+            PortErrorKind::Permanent,
+            "command dispatcher does not support topology-fenced dispatch",
+        ))
+    }
 }
 
 /// Delivers an already-routed command to the physical device data plane.

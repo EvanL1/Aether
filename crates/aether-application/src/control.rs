@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use aether_domain::{CommandId, ControlCommand, PointAddress};
-use aether_ports::{AuditOutcome, AuditRecord, AuditSink, CommandDispatcher};
+use aether_ports::{AuditOutcome, AuditRecord, AuditSink, CommandDispatcher, CommandTopologyFence};
 
 use crate::{
     ApplicationError, CommandAcceptance, DEFAULT_COMMAND_TTL_MS, RequestContext, SafetyPolicy,
@@ -44,12 +44,42 @@ impl ControlApplication {
         target: PointAddress,
         value: f64,
     ) -> Result<CommandAcceptance, ApplicationError> {
+        self.write_point_inner(context, command_id, target, value, None)
+            .await
+    }
+
+    /// Executes a derived command only through a dispatcher that can enforce
+    /// the topology publication captured before the decision was evaluated.
+    ///
+    /// External HTTP, CLI, MCP, and embedded manual commands continue to use
+    /// [`Self::write_point`] and are intentionally unaffected by this fence.
+    pub async fn write_point_fenced(
+        &self,
+        context: &RequestContext,
+        command_id: CommandId,
+        target: PointAddress,
+        value: f64,
+        fence: CommandTopologyFence,
+    ) -> Result<CommandAcceptance, ApplicationError> {
+        self.write_point_inner(context, command_id, target, value, Some(fence))
+            .await
+    }
+
+    async fn write_point_inner(
+        &self,
+        context: &RequestContext,
+        command_id: CommandId,
+        target: PointAddress,
+        value: f64,
+        fence: Option<CommandTopologyFence>,
+    ) -> Result<CommandAcceptance, ApplicationError> {
         if let Err(error) = self.policy.authorize(WRITE_POINT_CAPABILITY, context) {
             self.record_audit(
                 context,
                 command_id,
                 target,
                 value,
+                fence,
                 AuditOutcome::Rejected,
                 Some(error.to_string()),
             )
@@ -72,6 +102,7 @@ impl ControlApplication {
                         command_id,
                         target,
                         value,
+                        fence,
                         AuditOutcome::Rejected,
                         Some(error.to_string()),
                     )
@@ -85,12 +116,17 @@ impl ControlApplication {
             command_id,
             target,
             value,
+            fence,
             AuditOutcome::Attempted,
             None,
         )
         .await?;
 
-        match self.dispatcher.dispatch(command).await {
+        let dispatch = match fence {
+            Some(fence) => self.dispatcher.dispatch_fenced(command, fence).await,
+            None => self.dispatcher.dispatch(command).await,
+        };
+        match dispatch {
             Ok(receipt) => {
                 match self
                     .record_audit(
@@ -98,6 +134,7 @@ impl ControlApplication {
                         command_id,
                         target,
                         value,
+                        fence,
                         AuditOutcome::Succeeded,
                         None,
                     )
@@ -116,6 +153,7 @@ impl ControlApplication {
                     command_id,
                     target,
                     value,
+                    fence,
                     AuditOutcome::Failed,
                     Some(error.to_string()),
                 )
@@ -131,6 +169,7 @@ impl ControlApplication {
         command_id: CommandId,
         target: PointAddress,
         value: f64,
+        fence: Option<CommandTopologyFence>,
         outcome: AuditOutcome,
         failure: Option<String>,
     ) -> Result<(), ApplicationError> {
@@ -141,6 +180,10 @@ impl ControlApplication {
             target.kind(),
             target.point_id().get(),
         );
+        if let Some(fence) = fence {
+            detail.push_str("; expected_topology_sequence=");
+            detail.push_str(&fence.expected_sequence().to_string());
+        }
         if let Some(failure) = failure {
             detail.push_str("; ");
             detail.push_str(&failure);

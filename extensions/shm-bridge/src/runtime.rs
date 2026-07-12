@@ -187,6 +187,7 @@ impl ShmWriterHandle {
             snapshot,
             Arc::clone(&authority_gate),
             observer.clone(),
+            None,
         )?;
         Ok(Self {
             current: ArcSwapOption::new(Some(Arc::new(generation))),
@@ -205,12 +206,14 @@ impl ShmWriterHandle {
     /// Atomically replaces the canonical segment with a fresh manifest.
     pub fn rebuild(&self, manifest: Arc<ChannelPointManifest>) -> PortResult<()> {
         validate_capacity(&self.config, &manifest)?;
+        let previous = self.current.load_full();
         let generation = publish_generation(
             &self.config,
             manifest,
             None,
             Arc::clone(&self.authority_gate),
             self.observer.clone(),
+            previous.as_deref(),
         )?;
         self.current.store(Some(Arc::new(generation)));
         Ok(())
@@ -249,6 +252,7 @@ fn publish_generation(
     snapshot: Option<&Path>,
     authority_gate: Arc<RwLock<()>>,
     observer: Option<Arc<dyn AcquisitionCommitObserver>>,
+    previous: Option<&ShmWriterGeneration>,
 ) -> PortResult<ShmWriterGeneration> {
     let _local_authority = authority_gate.write().map_err(|_| {
         PortError::new(
@@ -276,8 +280,27 @@ fn publish_generation(
         restore_exact_snapshot(&writer, snapshot_path, &manifest)?;
     }
     writer.flush().map_err(map_dataplane_error)?;
+    let discovered_previous = if previous.is_none() {
+        SlotWriter::open_canonical_for_replacement(config.path(), &_cross_process_authority)
+            .map_err(map_dataplane_error)?
+    } else {
+        None
+    };
+    let previous_writer = previous
+        .map(|generation| generation.writer.as_ref())
+        .or(discovered_previous.as_ref());
+    let invalidation = previous_writer
+        .map(|writer| {
+            writer
+                .begin_generation_swap(&_cross_process_authority)
+                .map_err(map_dataplane_error)
+        })
+        .transpose()?;
     commit_generation_swap_locked(&staging_path, config.path(), &_cross_process_authority)
         .map_err(map_dataplane_error)?;
+    if let Some(invalidation) = invalidation {
+        invalidation.commit();
+    }
     cleanup.0 = None;
 
     let writer = Arc::new(
