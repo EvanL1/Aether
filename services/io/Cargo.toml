@@ -31,7 +31,7 @@ aether-store-local = { path = "../../extensions/store-local", features = ["sqlit
 voltage_modbus = { version = "0.5.0", optional = true, features = ["rtu"] }
 voltage_iec104 = { version = "0.1", optional = true }
 voltage_j1939 = { version = "0.1", optional = true }
-async-opcua = { version = "0.14", default-features = false, features = ["client"], optional = true }
+async-opcua = { version = "0.18", default-features = false, features = ["client"], optional = true }
 tokio-serial = { version = "5.4", optional = true }
 
 # Core async runtime

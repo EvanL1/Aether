@@ -833,9 +833,9 @@ dependencies = [
 
 [[package]]
 name = "async-opcua"
-version = "0.14.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3402fded74cfe4a174660fa4c2574a12161de320dd46a7cdefe7470e2b7a849b"
+checksum = "21b41aafb34371afea4ce25f026c5a46e5872d2aca6a3fdcf1fcc12d52636768"
 dependencies = [
  "async-opcua-client",
  "async-opcua-core",
@@ -843,14 +843,13 @@ dependencies = [
  "async-opcua-macros",
  "async-opcua-types",
  "chrono",
- "log",
 ]
 
 [[package]]
 name = "async-opcua-client"
-version = "0.14.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dae953761a12ea040783b7bae61072919883c52f037d8d105848ca4cf86bf2f"
+checksum = "e33d8045bf3d4187bdb5eb4f224aa7fecb804c63a79ac32ad38950b4f05ac159"
 dependencies = [
  "arc-swap",
  "async-opcua-core",
@@ -861,39 +860,39 @@ dependencies = [
  "chrono",
  "futures",
  "hashbrown 0.15.5",
- "log",
  "parking_lot",
  "rsa",
  "serde",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
 name = "async-opcua-core"
-version = "0.14.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a31be372f044033acc33de169fa9a3676b569397f0a28faf66e065db122670f"
+checksum = "a42c80b9cf8b9501a48961895b1f750a550414ce2fe54fe89599394d64277540"
 dependencies = [
  "async-opcua-crypto",
  "async-opcua-types",
  "bytes",
  "chrono",
- "log",
  "parking_lot",
  "serde",
  "serde_yaml",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
  "url",
 ]
 
 [[package]]
 name = "async-opcua-crypto"
-version = "0.14.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23822a7e20788837eda2deb718859e95ce47f70d4a997370d075693d3b3ecfaa"
+checksum = "191907b348a30a2f02b910704a0a18a46de78ee32c71efceac6da459104b4d2b"
 dependencies = [
  "aes",
  "async-opcua-types",
@@ -902,20 +901,21 @@ dependencies = [
  "const-oid",
  "gethostname",
  "hmac",
- "log",
+ "num-bigint-dig",
  "rand 0.8.6",
  "rsa",
  "serde",
  "sha1",
  "sha2",
+ "tracing",
  "x509-cert",
 ]
 
 [[package]]
 name = "async-opcua-macros"
-version = "0.14.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44e04473ed2e9b62f4ad279075176a0dd346f63bd223c39207be6b89369ac94b"
+checksum = "76e8cb06fbdab437ab32ae38fee132f3c5a4065664cdc2448087e06518103a1b"
 dependencies = [
  "base64",
  "convert_case",
@@ -927,24 +927,24 @@ dependencies = [
 
 [[package]]
 name = "async-opcua-nodes"
-version = "0.14.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3604b69de49fd99f63deb3c1e562ed61d89bf0e627c1f2cc8565c5f09eb9f004"
+checksum = "c9aa04366fbb50e5e5eab459604657ee0872f1b7f4da7bd0eb086160ccc7cd04"
 dependencies = [
  "async-opcua-macros",
  "async-opcua-types",
  "bitflags 2.10.0",
  "hashbrown 0.15.5",
- "log",
  "regex",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
 name = "async-opcua-types"
-version = "0.14.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c06104934a9f86f482d526f37ccbec14e9bf920fcdb2f6a04425ad8ce60ea4ac"
+checksum = "754239d6e4744a6fc46a31de56af8817728474d13ae7af37309f13d549e24630"
 dependencies = [
  "async-opcua-macros",
  "base64",
@@ -952,9 +952,10 @@ dependencies = [
  "byteorder",
  "chrono",
  "hashbrown 0.15.5",
- "log",
+ "percent-encoding-rfc3986",
  "regex",
  "thiserror 1.0.69",
+ "tracing",
  "uuid",
 ]
 
@@ -3264,6 +3265,7 @@ dependencies = [
  "num-iter",
  "num-traits",
  "rand 0.8.6",
+ "serde",
  "smallvec",
  "zeroize",
 ]
@@ -3505,6 +3507,12 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "percent-encoding-rfc3986"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3637c05577168127568a64e9dc5a6887da720efef07b3d9472d45f63ab191166"
 
 [[package]]
 name = "pin-project-lite"
