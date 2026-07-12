@@ -194,6 +194,13 @@ impl AcceptedOutcome<ActionRoutingMutationReceipt> {
     pub const fn affected_routes(&self) -> u64 {
         self.receipt.affected_routes()
     }
+
+    /// Returns whether the committed routes were published or commands were
+    /// revoked fail-closed pending reconciliation.
+    #[must_use]
+    pub const fn runtime_status(&self) -> &aether_ports::ActionRoutingRuntimeStatus {
+        self.receipt.runtime_status()
+    }
 }
 
 /// Accepted I/O channel-management outcome with terminal audit state.

@@ -703,6 +703,7 @@ mod openapi_tests {
             assert!(
                 success["description"].as_str().is_some_and(|description| {
                     description.contains("audit.status=incomplete")
+                        && description.contains("runtime.status=commands_revoked")
                         && description.contains("retryable=false")
                         && description.contains("must not be retried")
                 }),
@@ -718,6 +719,7 @@ mod openapi_tests {
                 "operation",
                 "affected_routes",
                 "audit",
+                "runtime",
                 "retryable",
             ] {
                 assert!(

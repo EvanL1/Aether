@@ -5,6 +5,7 @@ mod alarm;
 mod audit;
 mod automation;
 mod channel;
+mod channel_health;
 mod clock;
 mod control;
 mod data_processing;
@@ -23,9 +24,10 @@ pub use alarm::{
 pub use audit::{AuditOutcome, AuditRecord, AuditSink};
 pub use automation::{
     ActionRoute, ActionRouteKey, ActionRoutingMutation, ActionRoutingMutationKind,
-    ActionRoutingMutationReceipt, ActionRoutingTarget, AutomationActionRoutingMutator,
-    AutomationRuleExecutor, AutomationRuleMutator, RuleExecutionReceipt, RuleMutation,
-    RuleMutationKind, RuleMutationReceipt, RuleSchedulerRefreshStatus,
+    ActionRoutingMutationReceipt, ActionRoutingRuntimeStatus, ActionRoutingTarget,
+    AutomationActionRoutingMutator, AutomationRuleExecutor, AutomationRuleMutator,
+    RuleExecutionReceipt, RuleMutation, RuleMutationKind, RuleMutationReceipt,
+    RuleSchedulerRefreshStatus,
 };
 pub use channel::{
     ChannelDefinition, ChannelDesiredStateObservation, ChannelLoggingPolicy, ChannelMutation,
@@ -34,8 +36,9 @@ pub use channel::{
     ChannelReconciliationReceipt, ChannelReconciliationScope, ChannelRevision,
     ChannelRuntimeProjection,
 };
+pub use channel_health::{ChannelHealthObservation, ChannelHealthSource};
 pub use clock::Clock;
-pub use control::{CommandDispatcher, CommandReceipt, DeviceCommandSink};
+pub use control::{CommandDispatcher, CommandReceipt, CommandTopologyFence, DeviceCommandSink};
 pub use data_processing::{
     CovariateSource, CovariateWindow, DataBoundary, DataProcessor, DataProcessorDescriptor,
     HistoryQuery, HistoryWindow, ProcessorHealth, SourcedSegment,

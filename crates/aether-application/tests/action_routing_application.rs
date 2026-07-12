@@ -18,6 +18,7 @@ struct RecordingMutator {
     mutations: Mutex<Vec<ActionRoutingMutation>>,
     events: Arc<Mutex<Vec<&'static str>>>,
     failure: Option<PortError>,
+    publication_failure: Option<PortError>,
 }
 
 impl RecordingMutator {
@@ -26,6 +27,7 @@ impl RecordingMutator {
             mutations: Mutex::new(Vec::new()),
             events,
             failure: None,
+            publication_failure: None,
         }
     }
 
@@ -36,6 +38,19 @@ impl RecordingMutator {
             failure: Some(PortError::new(
                 PortErrorKind::Conflict,
                 "route changed concurrently",
+            )),
+            publication_failure: None,
+        }
+    }
+
+    fn committed_with_revoked_commands(events: Arc<Mutex<Vec<&'static str>>>) -> Self {
+        Self {
+            mutations: Mutex::new(Vec::new()),
+            events,
+            failure: None,
+            publication_failure: Some(PortError::new(
+                PortErrorKind::Unavailable,
+                "physical topology is incomplete",
             )),
         }
     }
@@ -53,6 +68,14 @@ impl AutomationActionRoutingMutator for RecordingMutator {
         self.mutations.lock().expect("mutation lock").push(mutation);
         if let Some(failure) = &self.failure {
             return Err(failure.clone());
+        }
+        if let Some(failure) = &self.publication_failure {
+            return Ok(ActionRoutingMutationReceipt::commands_revoked(
+                kind,
+                target,
+                1,
+                failure.clone(),
+            ));
         }
         Ok(ActionRoutingMutationReceipt::new(kind, target, 1))
     }
@@ -262,6 +285,35 @@ async fn port_failure_is_returned_as_typed_application_error_and_failed_audited(
 }
 
 #[tokio::test]
+async fn committed_but_revoked_runtime_is_a_non_retryable_accepted_outcome() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mutator = Arc::new(RecordingMutator::committed_with_revoked_commands(
+        Arc::clone(&events),
+    ));
+    let audit = Arc::new(RecordingAudit::successful(Arc::clone(&events)));
+    let application = ActionRoutingApplication::new(mutator, audit.clone(), SafetyPolicy);
+
+    let acceptance = application
+        .mutate(&context(true, true), mutation())
+        .await
+        .expect("durably committed routing must not be returned as a retryable error");
+
+    assert!(!acceptance.runtime_status().is_published());
+    assert!(acceptance.runtime_status().reconciliation_required());
+    assert!(!acceptance.is_retryable());
+    assert_eq!(
+        *events.lock().expect("event lock"),
+        vec!["audit.attempted", "mutate", "audit.succeeded"]
+    );
+    assert!(
+        audit.records.lock().expect("record lock")[1]
+            .detail()
+            .expect("completion detail")
+            .contains("runtime_status=commands_revoked")
+    );
+}
+
+#[tokio::test]
 async fn terminal_audit_failure_returns_non_retryable_accepted_outcome() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let mutator = Arc::new(RecordingMutator::successful(Arc::clone(&events)));
@@ -284,6 +336,30 @@ async fn terminal_audit_failure_returns_non_retryable_accepted_outcome() {
     );
     assert!(!acceptance.is_retryable());
     assert_eq!(mutator.mutations.lock().expect("mutation lock").len(), 1);
+    assert_eq!(
+        *events.lock().expect("event lock"),
+        vec!["audit.attempted", "mutate"]
+    );
+}
+
+#[tokio::test]
+async fn runtime_degradation_and_terminal_audit_failure_are_both_preserved() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mutator = Arc::new(RecordingMutator::committed_with_revoked_commands(
+        Arc::clone(&events),
+    ));
+    let audit = Arc::new(RecordingAudit::failing_on(Arc::clone(&events), 2));
+    let application = ActionRoutingApplication::new(mutator, audit, SafetyPolicy);
+
+    let acceptance = application
+        .mutate(&context(true, true), mutation())
+        .await
+        .expect("both post-commit degradations remain an accepted outcome");
+
+    assert!(acceptance.completion_audit().failure().is_some());
+    assert!(acceptance.runtime_status().failure().is_some());
+    assert!(acceptance.runtime_status().reconciliation_required());
+    assert!(!acceptance.is_retryable());
     assert_eq!(
         *events.lock().expect("event lock"),
         vec!["audit.attempted", "mutate"]

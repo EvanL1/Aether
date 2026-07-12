@@ -1,9 +1,10 @@
 use super::*;
-use crate::MemoryRuleLiveState;
+use crate::{MemoryRuleLiveState, RuleExecutionContext, RuleLiveState};
 use aether_domain::TimestampMs;
-use aether_ports::{CommandReceipt, PortError, PortErrorKind, PortResult};
+use aether_ports::{CommandReceipt, CommandTopologyFence, PortError, PortErrorKind, PortResult};
 use async_trait::async_trait;
 use serde_json::json;
+use std::sync::Mutex;
 
 use crate::parser::extract_rule_flow;
 
@@ -42,6 +43,57 @@ impl RuleActionCommandFacade for FailingActionCommands {
         Err(PortError::new(
             PortErrorKind::Unavailable,
             "simulated governed action failure",
+        ))
+    }
+}
+
+struct FencedRuleLiveState {
+    fence: CommandTopologyFence,
+}
+
+impl RuleLiveState for FencedRuleLiveState {
+    fn begin_execution(&self) -> RuleExecutionContext {
+        RuleExecutionContext::topology_fenced(self.fence)
+    }
+
+    fn get_instance(
+        &self,
+        instance_id: u32,
+        instance_type: u8,
+        point_id: u32,
+    ) -> Option<(f64, u64)> {
+        (instance_id == 5 && instance_type == 0 && point_id == 3).then_some((3.5, 1))
+    }
+
+    fn get_instance_for_execution(
+        &self,
+        execution: RuleExecutionContext,
+        instance_id: u32,
+        instance_type: u8,
+        point_id: u32,
+    ) -> Option<(f64, u64)> {
+        if execution.command_topology_fence() != Some(self.fence) {
+            return None;
+        }
+        self.get_instance(instance_id, instance_type, point_id)
+    }
+}
+
+#[derive(Default)]
+struct RecordingActionCommands {
+    commands: Mutex<Vec<RuleActionCommand>>,
+}
+
+#[async_trait]
+impl RuleActionCommandFacade for RecordingActionCommands {
+    async fn write_action(&self, command: RuleActionCommand) -> PortResult<CommandReceipt> {
+        self.commands
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(command);
+        Ok(CommandReceipt::new(
+            aether_domain::CommandId::new(1),
+            TimestampMs::new(1),
         ))
     }
 }
@@ -294,6 +346,28 @@ async fn failed_attempted_action_makes_rule_execution_fail() {
         result.error.as_deref(),
         Some("1 of 1 attempted rule actions failed")
     );
+}
+
+#[tokio::test]
+async fn rule_execution_carries_one_topology_fence_from_reads_to_actions() {
+    let fence = CommandTopologyFence::new(41);
+    let live_state = Arc::new(FencedRuleLiveState { fence });
+    let commands = Arc::new(RecordingActionCommands::default());
+    let executor = RuleExecutor::new(live_state, Arc::new(RoutingCache::default()))
+        .with_action_command_facade(Arc::clone(&commands) as Arc<dyn RuleActionCommandFacade>);
+
+    let result = executor
+        .execute(&create_soc_rule())
+        .await
+        .unwrap_or_else(|error| panic!("execute fenced rule: {error}"));
+
+    assert!(result.success);
+    let recorded = commands
+        .commands
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].topology_fence(), Some(fence));
 }
 
 #[tokio::test]

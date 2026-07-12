@@ -152,6 +152,78 @@ fn rebuild_migrates_only_intersection_state_and_timestamp() {
 }
 
 #[test]
+fn topology_change_immediately_fences_a_retained_health_reader_without_inode_polling() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("channel-health.shm");
+    let first_manifest = Arc::new(ChannelHealthManifest::from_channel_ids([3]));
+    let handle = ShmChannelHealthWriterHandle::create(&path, Arc::clone(&first_manifest))
+        .expect("publish initial health generation");
+    handle
+        .set_online(3, true, aether_shm_bridge::timestamp_ms())
+        .expect("publish initial health state");
+    let retained_reader = ShmChannelHealthReader::new(
+        ShmClientConfig::new(&path, first_manifest.layout_hash())
+            .with_identity_check_interval(Duration::from_secs(60))
+            .with_writer_stale_after(Duration::from_secs(60)),
+        first_manifest,
+    );
+    assert!(
+        retained_reader
+            .read_channel(3)
+            .expect("read initial health generation")
+            .expect("initial health sample")
+            .online()
+    );
+
+    handle
+        .rebuild(Arc::new(ChannelHealthManifest::from_channel_ids([9])))
+        .expect("publish replacement health topology");
+
+    let error = retained_reader
+        .read_channel(3)
+        .expect_err("retained reader must not return the unlinked channel state");
+    assert!(error.to_string().contains("manifest mismatch"), "{error}");
+}
+
+#[test]
+fn health_writer_restart_immediately_fences_a_retained_reader_without_inode_polling() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("channel-health.shm");
+    let manifest = Arc::new(ChannelHealthManifest::from_channel_ids([3]));
+    let first = ShmChannelHealthWriterHandle::create(&path, Arc::clone(&manifest))
+        .expect("publish initial health generation");
+    first
+        .set_online(3, true, aether_shm_bridge::timestamp_ms())
+        .expect("publish initial health state");
+    let retained_reader = ShmChannelHealthReader::new(
+        ShmClientConfig::new(&path, manifest.layout_hash())
+            .with_identity_check_interval(Duration::from_secs(60))
+            .with_writer_stale_after(Duration::from_secs(60)),
+        Arc::clone(&manifest),
+    );
+    assert!(
+        retained_reader
+            .read_channel(3)
+            .expect("read initial health generation")
+            .expect("initial health sample")
+            .online()
+    );
+    drop(first);
+
+    let _replacement = ShmChannelHealthWriterHandle::create(&path, manifest)
+        .expect("publish health generation after writer restart");
+
+    match retained_reader.read_channel(3) {
+        Ok(Some(replacement)) => panic!(
+            "the retained reader returned a pre-restart health observation at {}",
+            replacement.timestamp_ms()
+        ),
+        Ok(None) => {},
+        Err(error) => assert!(error.is_retryable(), "unexpected reader error: {error}"),
+    }
+}
+
+#[test]
 fn identical_manifest_rebuild_is_a_true_no_op() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let path = directory.path().join("channel-health.shm");

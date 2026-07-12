@@ -469,7 +469,7 @@ async fn push_point_watch_batch(
     shutdown: &CancellationToken,
 ) {
     let mut changed_slots = HashSet::new();
-    if let Ok(slot) = usize::try_from(first.slot_index()) {
+    if let Some(slot) = hub.live_values.validated_point_watch_slot(first) {
         changed_slots.insert(slot);
     }
     tokio::select! {
@@ -477,7 +477,7 @@ async fn push_point_watch_batch(
         _ = tokio::time::sleep(Duration::from_millis(debounce_ms)) => {}
     }
     while let Ok(event) = event_rx.try_recv() {
-        if let Ok(slot) = usize::try_from(event.slot_index()) {
+        if let Some(slot) = hub.live_values.validated_point_watch_slot(event) {
             changed_slots.insert(slot);
         }
     }

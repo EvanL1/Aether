@@ -1,23 +1,28 @@
 //! WebSocket live-state reads from SHM.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use aether_domain::{PointAddress, PointKind};
-use aether_ports::{PortError, PortErrorKind, PortResult};
+use aether_domain::{ChannelId, PointAddress, PointKind, PointQuality, PointSample, TimestampMs};
+#[cfg(test)]
+use aether_ports::ChannelHealthObservation;
+use aether_ports::{ChannelHealthSource, LiveState, PortError, PortErrorKind, PortResult};
 use aether_shm_bridge::{
-    ChannelHealthSample, ChannelPointManifest, ReconnectingSlotSource, ShmChannelHealthReader,
-    ShmClientConfig, ShmLiveState, SlotSnapshot, SlotSource, StaticSlotResolver,
+    ChannelPointManifest, PhysicalPointAddress, PointWatchEvent, ShmClientConfig,
+    ShmReadTopologyGeneration, SlotSnapshot, SlotSource,
 };
-use aether_store_local::load_sqlite_shm_topology;
+use aether_store_local::{SqliteLiveTopologySnapshot, load_sqlite_live_topology};
 use anyhow::Context;
+use arc_swap::ArcSwap;
+use async_trait::async_trait;
 use sqlx::SqlitePool;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::GatewayConfig;
 
 /// One physical channel point referenced by instance routing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChannelPointRef {
     channel_id: u32,
     kind: PointKind,
@@ -90,12 +95,6 @@ impl GatewayRouting {
     }
 }
 
-/// Read side for the separate channel-connectivity plane.
-pub trait ChannelHealthSource: Send + Sync + 'static {
-    /// Reads one channel connectivity sample.
-    fn read_channel(&self, channel_id: u32) -> PortResult<Option<ChannelHealthSample>>;
-}
-
 /// Test-only empty health source.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -103,14 +102,8 @@ pub struct NoChannelHealth;
 
 #[cfg(test)]
 impl ChannelHealthSource for NoChannelHealth {
-    fn read_channel(&self, _channel_id: u32) -> PortResult<Option<ChannelHealthSample>> {
+    fn read_channel(&self, _channel_id: ChannelId) -> PortResult<Option<ChannelHealthObservation>> {
         Ok(None)
-    }
-}
-
-impl ChannelHealthSource for ShmChannelHealthReader {
-    fn read_channel(&self, channel_id: u32) -> PortResult<Option<ChannelHealthSample>> {
-        ShmChannelHealthReader::read_channel(self, channel_id)
     }
 }
 
@@ -138,6 +131,11 @@ pub trait GatewayValueSource: Send + Sync + 'static {
     /// Resolves one homepage formula to its main-plane event slot.
     /// Channel-health formulas return `None` because they use a separate SHM.
     fn watched_formula_slot(&self, formula: &str) -> PortResult<Option<usize>>;
+
+    /// Validates a PointWatch hint against the pinned current manifest.
+    fn validated_point_watch_slot(&self, _event: PointWatchEvent) -> Option<usize> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -148,15 +146,22 @@ enum FormulaTarget {
 
 /// SHM-backed implementation of gateway current-value reads.
 pub struct ShmGatewayValueSource {
+    current: ArcSwap<GatewayValueGeneration>,
+}
+
+struct GatewayValueGeneration {
     slots: Arc<dyn SlotSource>,
     manifest: Arc<ChannelPointManifest>,
     routing: Arc<GatewayRouting>,
     channel_health: Arc<dyn ChannelHealthSource>,
+    topology: Option<Arc<ShmReadTopologyGeneration>>,
+    digest: u64,
 }
 
 impl ShmGatewayValueSource {
     /// Creates the source from independently testable capabilities.
     #[must_use]
+    #[cfg(test)]
     pub fn new<S, H>(
         slots: Arc<S>,
         manifest: Arc<ChannelPointManifest>,
@@ -168,13 +173,81 @@ impl ShmGatewayValueSource {
         H: ChannelHealthSource,
     {
         Self {
-            slots,
-            manifest,
-            routing,
-            channel_health,
+            current: ArcSwap::from_pointee(GatewayValueGeneration {
+                slots,
+                manifest,
+                routing,
+                channel_health,
+                topology: None,
+                digest: 0,
+            }),
         }
     }
 
+    /// Reloads a complete SQLite snapshot and publishes it only after both SHM
+    /// planes validate against that same snapshot.
+    pub async fn refresh_topology(
+        &self,
+        pool: &SqlitePool,
+        config: &GatewayConfig,
+    ) -> PortResult<bool> {
+        let snapshot = load_sqlite_live_topology(pool).await?;
+        let current = self.current.load_full();
+        if current.digest == snapshot.digest() {
+            return Ok(false);
+        }
+
+        let physical_layout_unchanged = current.topology.as_ref().is_some_and(|topology| {
+            topology.point_manifest().layout_hash() == snapshot.point_manifest().layout_hash()
+                && topology.point_manifest().slot_count() == snapshot.point_manifest().slot_count()
+                && topology.health_manifest().layout_hash()
+                    == snapshot.health_manifest().layout_hash()
+                && topology.health_manifest().slot_count()
+                    == snapshot.health_manifest().slot_count()
+        });
+        if physical_layout_unchanged {
+            self.current.store(Arc::new(GatewayValueGeneration {
+                slots: Arc::clone(&current.slots),
+                manifest: Arc::clone(&current.manifest),
+                routing: gateway_routing(&snapshot),
+                channel_health: Arc::clone(&current.channel_health),
+                topology: current.topology.clone(),
+                digest: snapshot.digest(),
+            }));
+            return Ok(true);
+        }
+
+        let owned_config = config.clone();
+        let candidate = tokio::task::spawn_blocking(move || {
+            build_gateway_generation(snapshot, &owned_config, true)
+        })
+        .await
+        .map_err(|error| {
+            PortError::new(
+                PortErrorKind::Unavailable,
+                format!("API topology validation task failed: {error}"),
+            )
+        })??;
+        let candidate = Arc::new(candidate);
+        let topology = Arc::clone(candidate.topology.as_ref().ok_or_else(|| {
+            PortError::new(
+                PortErrorKind::Permanent,
+                "production gateway generation has no physical topology",
+            )
+        })?);
+        topology.with_validated_authority(|| self.current.store(candidate))?;
+        Ok(true)
+    }
+
+    /// Returns whether an event still names the current typed physical slot.
+    #[must_use]
+    pub fn accepts_point_watch_event(&self, event: PointWatchEvent) -> bool {
+        let generation = self.current.load();
+        event.matches_manifest(&generation.manifest)
+    }
+}
+
+impl GatewayValueGeneration {
     fn read_point(&self, target: ChannelPointRef) -> PortResult<Option<SlotSnapshot>> {
         let Some(slot) = self
             .manifest
@@ -257,11 +330,12 @@ impl GatewayValueSource for ShmGatewayValueSource {
         owner_id: i64,
         data_type: &str,
     ) -> PortResult<BTreeMap<String, SlotSnapshot>> {
+        let generation = self.current.load();
         let owner_id = checked_u32(owner_id, "subscription owner id")?;
         if source == "io" && data_type == "online" {
-            return Ok(self
+            return Ok(generation
                 .channel_health
-                .read_channel(owner_id)?
+                .read_channel(ChannelId::new(owner_id))?
                 .map(|sample| {
                     BTreeMap::from([(
                         owner_id.to_string(),
@@ -275,9 +349,9 @@ impl GatewayValueSource for ShmGatewayValueSource {
         }
 
         let targets = match source {
-            "io" => self.channel_targets(owner_id, data_type)?,
+            "io" => generation.channel_targets(owner_id, data_type)?,
             "inst" if matches!(data_type, "M" | "A") => {
-                self.routing.points(owner_id, data_type).collect()
+                generation.routing.points(owner_id, data_type).collect()
             },
             _ => {
                 return Err(invalid_target(format!(
@@ -287,7 +361,7 @@ impl GatewayValueSource for ShmGatewayValueSource {
         };
         let mut values = BTreeMap::new();
         for (point_id, target) in targets {
-            if let Some(sample) = self.read_point(target)? {
+            if let Some(sample) = generation.read_point(target)? {
                 values.insert(point_id.to_string(), sample);
             }
         }
@@ -295,19 +369,21 @@ impl GatewayValueSource for ShmGatewayValueSource {
     }
 
     fn read_formula(&self, formula: &str) -> PortResult<Option<SlotSnapshot>> {
-        let Some(target) = self.formula_target(formula)? else {
+        let generation = self.current.load();
+        let Some(target) = generation.formula_target(formula)? else {
             return Ok(None);
         };
         match target {
-            FormulaTarget::ChannelHealth(channel_id) => {
-                Ok(self.channel_health.read_channel(channel_id)?.map(|sample| {
+            FormulaTarget::ChannelHealth(channel_id) => Ok(generation
+                .channel_health
+                .read_channel(ChannelId::new(channel_id))?
+                .map(|sample| {
                     SlotSnapshot::new(
                         if sample.online() { 1.0 } else { 0.0 },
                         sample.timestamp_ms(),
                     )
-                }))
-            },
-            FormulaTarget::Main(target) => self.read_point(target),
+                })),
+            FormulaTarget::Main(target) => generation.read_point(target),
         }
     }
 
@@ -317,21 +393,23 @@ impl GatewayValueSource for ShmGatewayValueSource {
         owner_ids: &[i64],
         data_types: &[String],
     ) -> PortResult<BTreeSet<usize>> {
+        let generation = self.current.load();
         let mut slots = BTreeSet::new();
         for &owner_id in owner_ids {
             let owner_id = checked_u32(owner_id, "subscription owner id")?;
             for data_type in data_types {
                 let targets: Vec<_> = match source {
                     "io" if data_type == "online" => Vec::new(),
-                    "io" => self.channel_targets(owner_id, data_type)?,
+                    "io" => generation.channel_targets(owner_id, data_type)?,
                     "inst" if matches!(data_type.as_str(), "M" | "A") => {
-                        self.routing.points(owner_id, data_type).collect()
+                        generation.routing.points(owner_id, data_type).collect()
                     },
                     _ => continue,
                 };
                 for (_, target) in targets {
                     if let Some(slot) =
-                        self.manifest
+                        generation
+                            .manifest
                             .slot(target.channel_id, target.kind, target.point_id)
                     {
                         slots.insert(slot);
@@ -343,13 +421,21 @@ impl GatewayValueSource for ShmGatewayValueSource {
     }
 
     fn watched_formula_slot(&self, formula: &str) -> PortResult<Option<usize>> {
-        Ok(match self.formula_target(formula)? {
+        let generation = self.current.load();
+        Ok(match generation.formula_target(formula)? {
             Some(FormulaTarget::Main(target)) => {
-                self.manifest
+                generation
+                    .manifest
                     .slot(target.channel_id, target.kind, target.point_id)
             },
             Some(FormulaTarget::ChannelHealth(_)) | None => None,
         })
+    }
+
+    fn validated_point_watch_slot(&self, event: PointWatchEvent) -> Option<usize> {
+        self.accepts_point_watch_event(event)
+            .then(|| usize::try_from(event.slot_index()).ok())
+            .flatten()
     }
 }
 
@@ -392,141 +478,239 @@ pub async fn build_gateway_value_source(
     pool: &SqlitePool,
     config: &GatewayConfig,
 ) -> anyhow::Result<Arc<ShmGatewayValueSource>> {
-    let (point_manifest, health_manifest) = load_sqlite_shm_topology(pool)
+    let snapshot = load_sqlite_live_topology(pool)
         .await
-        .context("load canonical SHM topology for api")?
-        .into_manifests();
-    let manifest = Arc::new(point_manifest);
-    let routing = Arc::new(load_gateway_routing(pool).await?);
-    let health_manifest = Arc::new(health_manifest);
-    let slots = Arc::new(ReconnectingSlotSource::new(
-        ShmClientConfig::new(&config.shm_path, manifest.layout_hash())
-            .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
-            .with_identity_check_interval(Duration::from_millis(
-                config.shm_identity_check_interval_ms,
-            )),
-    ));
-    let health = Arc::new(ShmChannelHealthReader::new(
-        ShmClientConfig::new(
-            &config.channel_health_shm_path,
-            health_manifest.layout_hash(),
-        )
-        .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
-        .with_identity_check_interval(Duration::from_millis(config.shm_identity_check_interval_ms)),
-        health_manifest,
-    ));
+        .context("load canonical live topology for api")?;
+    let generation = build_gateway_generation(snapshot, config, false)?;
+    Ok(Arc::new(ShmGatewayValueSource {
+        current: ArcSwap::from_pointee(generation),
+    }))
+}
 
-    Ok(Arc::new(ShmGatewayValueSource::new(
-        slots, manifest, routing, health,
-    )))
+/// Periodically reloads the embedded topology and retains the last validated
+/// service generation while IO is between its point and health publications.
+pub async fn run_gateway_topology_refresh(
+    source: Arc<ShmGatewayValueSource>,
+    pool: SqlitePool,
+    config: GatewayConfig,
+    shutdown: CancellationToken,
+) {
+    let mut interval = tokio::time::interval(Duration::from_millis(
+        config.shm_topology_refresh_interval_ms.max(100),
+    ));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => break,
+            _ = interval.tick() => match source.refresh_topology(&pool, &config).await {
+                Ok(true) => tracing::info!("API live topology generation refreshed"),
+                Ok(false) => {},
+                Err(error) if error.is_retryable() => {
+                    tracing::warn!("API live topology refresh deferred: {error}");
+                },
+                Err(error) => tracing::error!("API live topology refresh rejected: {error}"),
+            },
+        }
+    }
+}
+
+fn build_gateway_generation(
+    snapshot: SqliteLiveTopologySnapshot,
+    config: &GatewayConfig,
+    validate_physical: bool,
+) -> PortResult<GatewayValueGeneration> {
+    let digest = snapshot.digest();
+    let routing = gateway_routing(&snapshot);
+    let (point_manifest, health_manifest, _, _) = snapshot.into_parts();
+    let point_manifest = Arc::new(point_manifest);
+    let health_manifest = Arc::new(health_manifest);
+    let point_config = ShmClientConfig::new(&config.shm_path, point_manifest.layout_hash())
+        .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
+        .with_identity_check_interval(Duration::from_millis(config.shm_identity_check_interval_ms));
+    let health_config = ShmClientConfig::new(
+        &config.channel_health_shm_path,
+        health_manifest.layout_hash(),
+    )
+    .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
+    .with_identity_check_interval(Duration::from_millis(config.shm_identity_check_interval_ms));
+    let topology = Arc::new(if validate_physical {
+        ShmReadTopologyGeneration::open(
+            point_config,
+            health_config,
+            point_manifest,
+            health_manifest,
+        )?
+    } else {
+        ShmReadTopologyGeneration::new_lazy(
+            point_config,
+            health_config,
+            point_manifest,
+            health_manifest,
+        )?
+    });
+    let slots: Arc<dyn SlotSource> = topology.point_source().clone();
+    let channel_health: Arc<dyn ChannelHealthSource> = topology.channel_health().clone();
+    Ok(GatewayValueGeneration {
+        slots,
+        manifest: Arc::clone(topology.point_manifest()),
+        routing,
+        channel_health,
+        topology: Some(topology),
+        digest,
+    })
+}
+
+fn gateway_routing(snapshot: &SqliteLiveTopologySnapshot) -> Arc<GatewayRouting> {
+    Arc::new(GatewayRouting::from_entries(
+        snapshot
+            .measurement_routes()
+            .map(|(instance_id, point_id, target)| {
+                (instance_id, point_id, channel_point_ref(target))
+            }),
+        snapshot
+            .action_routes()
+            .map(|(instance_id, point_id, target)| {
+                (instance_id, point_id, channel_point_ref(target))
+            }),
+    ))
+}
+
+const fn channel_point_ref(target: PhysicalPointAddress) -> ChannelPointRef {
+    ChannelPointRef::new(
+        target.channel_id().get(),
+        target.kind(),
+        target.point_id().get(),
+    )
 }
 
 /// Builds the read-only `LiveState` used by an enabled Data Processing route.
 ///
-/// Only explicitly commissioned logical point addresses are resolved. The
-/// adapter receives no SHM writer and does not change the existing authority.
-pub async fn build_data_processing_live_state(
-    pool: &SqlitePool,
-    config: &GatewayConfig,
+/// Only explicitly commissioned logical point addresses are resolved. Reads
+/// pin the gateway's current physical/routing generation and therefore follow
+/// validated topology refreshes without receiving any writer capability.
+pub fn build_data_processing_live_state(
+    source: Arc<ShmGatewayValueSource>,
     addresses: &[PointAddress],
-) -> anyhow::Result<Arc<ShmLiveState>> {
-    let (point_manifest, _health_manifest) = load_sqlite_shm_topology(pool)
-        .await
-        .context("load canonical SHM topology for data processing")?
-        .into_manifests();
-    let manifest = Arc::new(point_manifest);
-    let routing = load_gateway_routing(pool).await?;
-    let mut entries = Vec::with_capacity(addresses.len());
-    let mut commissioned_slots = std::collections::HashSet::new();
+) -> anyhow::Result<Arc<dyn LiveState>> {
+    let generation = source.current.load_full();
+    let mut commissioned = HashSet::with_capacity(addresses.len());
+    let mut physical_targets = HashSet::with_capacity(addresses.len());
     for address in addresses {
         if address.kind().is_writable() {
             anyhow::bail!("Data Processing live-state mapping targets a writable point");
         }
-        let target = routing
+        let target = generation
+            .routing
             .point(address.instance_id().get(), "M", address.point_id().get())
             .with_context(|| format!("no enabled measurement route for {address:?}"))?;
         if target.kind != address.kind() {
             anyhow::bail!("commissioned logical point kind does not match its physical route");
         }
-        let slot = manifest
+        generation
+            .manifest
             .slot(target.channel_id, target.kind, target.point_id)
             .with_context(|| format!("no SHM slot for commissioned point {address:?}"))?;
-        if !commissioned_slots.insert(slot) {
+        if !physical_targets.insert(target) {
             anyhow::bail!("multiple commissioned logical points resolve to one SHM slot");
         }
-        entries.push((*address, slot));
+        commissioned.insert(*address);
     }
-    let slots = Arc::new(ReconnectingSlotSource::new(
-        ShmClientConfig::new(&config.shm_path, manifest.layout_hash())
-            .with_writer_stale_after(Duration::from_millis(config.shm_writer_stale_after_ms))
-            .with_identity_check_interval(Duration::from_millis(
-                config.shm_identity_check_interval_ms,
-            )),
-    ));
-    Ok(Arc::new(ShmLiveState::new(
-        slots,
-        Arc::new(StaticSlotResolver::from_entries(entries)),
-    )))
+    Ok(Arc::new(GatewayCommissionedLiveState {
+        source,
+        commissioned,
+    }))
 }
 
-async fn load_gateway_routing(pool: &SqlitePool) -> anyhow::Result<GatewayRouting> {
-    let measurement_rows: Vec<(i64, i64, String, i64, i64)> = sqlx::query_as(
-        "SELECT instance_id, channel_id, channel_type, channel_point_id, measurement_id \
-         FROM measurement_routing WHERE enabled = TRUE",
-    )
-    .fetch_all(pool)
-    .await
-    .context("load measurement routing for api")?;
-    let action_rows: Vec<(i64, i64, String, i64, i64)> = sqlx::query_as(
-        "SELECT instance_id, channel_id, channel_type, channel_point_id, action_id \
-         FROM action_routing WHERE enabled = TRUE",
-    )
-    .fetch_all(pool)
-    .await
-    .context("load action routing for api")?;
-
-    let mut measurements = Vec::with_capacity(measurement_rows.len());
-    for (instance_id, channel_id, channel_type, channel_point_id, measurement_id) in
-        measurement_rows
-    {
-        let Some(kind) = parse_channel_kind(&channel_type) else {
-            tracing::warn!(
-                channel_type,
-                "skipping invalid measurement route point type"
-            );
-            continue;
-        };
-        measurements.push((
-            config_u32(instance_id, "measurement instance_id")?,
-            config_u32(measurement_id, "measurement_id")?,
-            ChannelPointRef::new(
-                config_u32(channel_id, "measurement channel_id")?,
-                kind,
-                config_u32(channel_point_id, "measurement channel_point_id")?,
-            ),
-        ));
-    }
-    let mut actions = Vec::with_capacity(action_rows.len());
-    for (instance_id, channel_id, channel_type, channel_point_id, action_id) in action_rows {
-        let Some(kind) = parse_channel_kind(&channel_type) else {
-            tracing::warn!(channel_type, "skipping invalid action route point type");
-            continue;
-        };
-        actions.push((
-            config_u32(instance_id, "action instance_id")?,
-            config_u32(action_id, "action_id")?,
-            ChannelPointRef::new(
-                config_u32(channel_id, "action channel_id")?,
-                kind,
-                config_u32(channel_point_id, "action channel_point_id")?,
-            ),
-        ));
-    }
-    Ok(GatewayRouting::from_entries(measurements, actions))
+struct GatewayCommissionedLiveState {
+    source: Arc<ShmGatewayValueSource>,
+    commissioned: HashSet<PointAddress>,
 }
 
-fn config_u32(value: i64, label: &str) -> anyhow::Result<u32> {
-    u32::try_from(value).with_context(|| format!("{label} must fit in u32, got {value}"))
+impl GatewayCommissionedLiveState {
+    fn resolve_target(
+        &self,
+        generation: &GatewayValueGeneration,
+        address: PointAddress,
+    ) -> PortResult<ChannelPointRef> {
+        if !self.commissioned.contains(&address) {
+            return Err(PortError::new(
+                PortErrorKind::NotFound,
+                format!("point {address:?} is not commissioned for Data Processing"),
+            ));
+        }
+        let target = generation
+            .routing
+            .point(address.instance_id().get(), "M", address.point_id().get())
+            .ok_or_else(|| {
+                PortError::new(
+                    PortErrorKind::NotFound,
+                    format!("no current measurement route for {address:?}"),
+                )
+            })?;
+        if target.kind != address.kind() {
+            return Err(PortError::new(
+                PortErrorKind::InvalidData,
+                format!("current physical route kind changed for {address:?}"),
+            ));
+        }
+        if generation
+            .manifest
+            .slot(target.channel_id, target.kind, target.point_id)
+            .is_none()
+        {
+            return Err(PortError::new(
+                PortErrorKind::InvalidData,
+                format!("current physical route is absent from SHM for {address:?}"),
+            ));
+        }
+        Ok(target)
+    }
+
+    fn read_from(
+        &self,
+        generation: &GatewayValueGeneration,
+        address: PointAddress,
+    ) -> PortResult<Option<PointSample>> {
+        let target = self.resolve_target(generation, address)?;
+        Ok(generation.read_point(target)?.map(|sample| {
+            PointSample::new(
+                address,
+                sample.value(),
+                TimestampMs::new(sample.timestamp_ms()),
+                PointQuality::Good,
+            )
+        }))
+    }
+}
+
+#[async_trait]
+impl LiveState for GatewayCommissionedLiveState {
+    async fn read(&self, address: PointAddress) -> PortResult<Option<PointSample>> {
+        let generation = self.source.current.load_full();
+        self.read_from(&generation, address)
+    }
+
+    async fn read_many(&self, addresses: &[PointAddress]) -> PortResult<Vec<Option<PointSample>>> {
+        let generation = self.source.current.load_full();
+        let mut physical_owners = HashMap::with_capacity(addresses.len());
+        for &address in addresses {
+            let target = self.resolve_target(&generation, address)?;
+            if physical_owners
+                .insert(target, address)
+                .is_some_and(|existing| existing != address)
+            {
+                return Err(PortError::new(
+                    PortErrorKind::InvalidData,
+                    "multiple commissioned Data Processing points now resolve to one SHM slot",
+                ));
+            }
+        }
+        addresses
+            .iter()
+            .copied()
+            .map(|address| self.read_from(&generation, address))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -639,13 +823,7 @@ mod tests {
             .expect("resolve formula slot")
             .expect("main-plane formula");
 
-        assert_eq!(
-            slot,
-            source
-                .manifest
-                .slot(10, PointKind::Telemetry, 1)
-                .expect("configured slot")
-        );
+        assert_eq!(slot, 1);
         assert_eq!(
             source
                 .watched_formula_slot("io:online:10")
@@ -671,6 +849,8 @@ mod tests {
             "CREATE TABLE action_routing (instance_id INTEGER, channel_id INTEGER, channel_type TEXT, channel_point_id INTEGER, action_id INTEGER, enabled BOOLEAN)",
             "INSERT INTO channels VALUES (10, 'modbus')",
             "INSERT INTO telemetry_points VALUES (10, 0)",
+            "INSERT INTO telemetry_points VALUES (10, 1)",
+            "INSERT INTO measurement_routing VALUES (100, 10, 'T', 0, 5, TRUE)",
         ] {
             sqlx::query(statement)
                 .execute(&pool)
@@ -700,10 +880,225 @@ mod tests {
         let source = super::build_gateway_value_source(&pool, &config)
             .await
             .expect("build before an active SHM writer is available");
+        assert_eq!(
+            source
+                .watched_formula_slot("inst:100:M:5")
+                .expect("resolve initial route"),
+            Some(0)
+        );
+        sqlx::query(
+            "UPDATE measurement_routing SET channel_point_id = 1 \
+             WHERE instance_id = 100 AND measurement_id = 5",
+        )
+        .execute(&pool)
+        .await
+        .expect("change routing only");
+        assert!(
+            source
+                .refresh_topology(&pool, &config)
+                .await
+                .expect("routing-only refresh does not require a writer")
+        );
+        assert_eq!(
+            source
+                .watched_formula_slot("inst:100:M:5")
+                .expect("resolve refreshed route"),
+            Some(1)
+        );
         let error = source
             .read_group("io", 10, "T")
             .expect_err("missing writer is a retryable read-time condition");
 
         assert!(error.is_retryable());
+    }
+
+    #[tokio::test]
+    async fn production_source_refreshes_point_health_and_routing_as_one_view() {
+        use aether_domain::{
+            AcquiredPointSample, ChannelId, ChannelPointAddress, InstanceId, PointAddress, PointId,
+            PointQuality, TimestampMs,
+        };
+        use aether_shm_bridge::{
+            PointWatchEvent, ShmChannelHealthWriterHandle, ShmRuntimeConfig, ShmWriterHandle,
+        };
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open embedded topology database");
+        for statement in [
+            "CREATE TABLE channels (channel_id INTEGER PRIMARY KEY, protocol TEXT NOT NULL)",
+            "CREATE TABLE telemetry_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE signal_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE control_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE adjustment_points (channel_id INTEGER, point_id INTEGER)",
+            "CREATE TABLE measurement_routing (instance_id INTEGER, channel_id INTEGER, channel_type TEXT, channel_point_id INTEGER, measurement_id INTEGER, enabled BOOLEAN)",
+            "CREATE TABLE action_routing (instance_id INTEGER, channel_id INTEGER, channel_type TEXT, channel_point_id INTEGER, action_id INTEGER, enabled BOOLEAN)",
+            "INSERT INTO channels VALUES (10, 'virtual')",
+            "INSERT INTO telemetry_points VALUES (10, 0)",
+            "INSERT INTO telemetry_points VALUES (10, 1)",
+            "INSERT INTO measurement_routing VALUES (100, 10, 'T', 0, 5, TRUE)",
+            "INSERT INTO measurement_routing VALUES (101, 10, 'T', 1, 6, TRUE)",
+        ] {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .expect("create initial topology");
+        }
+        let directory = tempfile::tempdir().expect("temporary SHM directory");
+        let point_path = directory.path().join("live.shm");
+        let health_path = directory.path().join("health.shm");
+        let config = crate::config::GatewayConfig {
+            shm_path: point_path.to_string_lossy().into_owned(),
+            channel_health_shm_path: health_path.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let first = aether_store_local::load_sqlite_live_topology(&pool)
+            .await
+            .expect("initial topology snapshot");
+        let point_writer = ShmWriterHandle::create_published(
+            ShmRuntimeConfig::new(&point_path, 32),
+            Arc::new(first.point_manifest().clone()),
+            None,
+        )
+        .expect("publish initial point plane");
+        let health_writer = ShmChannelHealthWriterHandle::create(
+            &health_path,
+            Arc::new(first.health_manifest().clone()),
+        )
+        .expect("publish initial health plane");
+        let first_timestamp = TimestampMs::new(aether_shm_bridge::timestamp_ms());
+        let first_sample = AcquiredPointSample::new(
+            ChannelPointAddress::new(ChannelId::new(10), PointKind::Telemetry, PointId::new(0))
+                .expect("initial address"),
+            10.0,
+            10.0,
+            first_timestamp,
+            PointQuality::Good,
+        )
+        .expect("initial sample");
+        point_writer
+            .generation()
+            .expect("initial point generation")
+            .acquisition_writer()
+            .commit_batch(&[first_sample])
+            .expect("write initial point");
+        health_writer
+            .update_heartbeat(aether_shm_bridge::timestamp_ms())
+            .expect("initial health heartbeat");
+
+        let source = super::build_gateway_value_source(&pool, &config)
+            .await
+            .expect("build live source");
+        let commissioned_address =
+            PointAddress::new(InstanceId::new(100), PointKind::Telemetry, PointId::new(5));
+        let second_commissioned_address =
+            PointAddress::new(InstanceId::new(101), PointKind::Telemetry, PointId::new(6));
+        let data_processing = super::build_data_processing_live_state(
+            Arc::clone(&source),
+            &[commissioned_address, second_commissioned_address],
+        )
+        .expect("commission Data Processing live state");
+        assert_eq!(
+            source
+                .read_formula("inst:100:M:5")
+                .expect("read initial route")
+                .expect("initial value")
+                .value(),
+            10.0
+        );
+        assert_eq!(
+            data_processing
+                .read(commissioned_address)
+                .await
+                .expect("read initial commissioned point")
+                .expect("initial commissioned sample")
+                .value(),
+            10.0
+        );
+        let old_event = PointWatchEvent::new(10, PointKind::Telemetry, 0, 0, 10.0, 10.0, 1_000, 1);
+        assert!(source.accepts_point_watch_event(old_event));
+
+        for statement in [
+            "INSERT INTO channels VALUES (5, 'virtual')",
+            "INSERT INTO telemetry_points VALUES (5, 0)",
+            "UPDATE measurement_routing SET channel_id = 5 WHERE instance_id = 100 AND measurement_id = 5",
+            "UPDATE measurement_routing SET channel_id = 5, channel_point_id = 0 WHERE instance_id = 101 AND measurement_id = 6",
+        ] {
+            sqlx::query(statement)
+                .execute(&pool)
+                .await
+                .expect("change desired topology");
+        }
+        let second = aether_store_local::load_sqlite_live_topology(&pool)
+            .await
+            .expect("replacement topology snapshot");
+        point_writer
+            .rebuild(Arc::new(second.point_manifest().clone()))
+            .expect("publish replacement point plane");
+        let partial_error = source
+            .refresh_topology(&pool, &config)
+            .await
+            .expect_err("point-only publication must not replace the service view");
+        assert!(partial_error.is_retryable());
+
+        health_writer
+            .rebuild(Arc::new(second.health_manifest().clone()))
+            .expect("publish replacement health plane");
+        health_writer
+            .update_heartbeat(aether_shm_bridge::timestamp_ms())
+            .expect("replacement health heartbeat");
+        let second_timestamp = TimestampMs::new(aether_shm_bridge::timestamp_ms());
+        let second_sample = AcquiredPointSample::new(
+            ChannelPointAddress::new(ChannelId::new(5), PointKind::Telemetry, PointId::new(0))
+                .expect("replacement address"),
+            50.0,
+            50.0,
+            second_timestamp,
+            PointQuality::Good,
+        )
+        .expect("replacement sample");
+        point_writer
+            .generation()
+            .expect("replacement point generation")
+            .acquisition_writer()
+            .commit_batch(&[second_sample])
+            .expect("write replacement point");
+
+        assert!(source.refresh_topology(&pool, &config).await.unwrap());
+        assert_eq!(
+            source
+                .read_formula("inst:100:M:5")
+                .expect("read replacement route")
+                .expect("replacement value")
+                .value(),
+            50.0
+        );
+        assert_eq!(
+            data_processing
+                .read(commissioned_address)
+                .await
+                .expect("read refreshed commissioned point")
+                .expect("refreshed commissioned sample")
+                .value(),
+            50.0
+        );
+        let duplicate_error = data_processing
+            .read_many(&[commissioned_address, second_commissioned_address])
+            .await
+            .expect_err("a refreshed duplicate physical target must fail closed");
+        assert_eq!(duplicate_error.kind(), PortErrorKind::InvalidData);
+        assert!(!source.accepts_point_watch_event(old_event));
+        assert!(source.accepts_point_watch_event(PointWatchEvent::new(
+            5,
+            PointKind::Telemetry,
+            0,
+            0,
+            50.0,
+            50.0,
+            2_000,
+            1,
+        )));
     }
 }

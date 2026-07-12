@@ -24,7 +24,10 @@ pub use live_state::MemoryLiveState;
 pub use outbox::MemoryOutbox;
 pub use snapshot_covariates::{SnapshotCovariateLimits, SnapshotCovariateSource};
 #[cfg(feature = "sqlite-topology")]
-pub use sqlite_topology::{SqliteShmTopologySnapshot, load_sqlite_shm_topology};
+pub use sqlite_topology::{
+    LogicalPointRoutes, SqliteLiveTopologySnapshot, SqliteShmTopologySnapshot,
+    load_sqlite_live_topology, load_sqlite_shm_topology,
+};
 
 fn lock_error(resource: &str) -> PortError {
     PortError::new(

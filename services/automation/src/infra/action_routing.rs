@@ -11,6 +11,7 @@ use aether_ports::{
 use async_trait::async_trait;
 use common::FourRemote;
 
+use crate::infra::runtime_topology::ActionRoutingMutationLease;
 use crate::instance_manager::InstanceManager;
 use crate::routing_loader::ActionRoutingRow;
 
@@ -116,7 +117,29 @@ impl SqliteActionRoutingMutator {
         Ok(instance_name)
     }
 
-    async fn publish_committed_routes(&self) -> PortResult<()> {
+    async fn publish_committed_routes(
+        &self,
+        topology_lease: Option<ActionRoutingMutationLease>,
+    ) -> PortResult<()> {
+        if let Some(topology_lease) = topology_lease {
+            return match topology_lease.publish(self.manager.pool()).await {
+                Ok(_) => Ok(()),
+                Err(error) => {
+                    // Commands were revoked before the SQLite transaction and
+                    // remain revoked after this failed publication. Periodic
+                    // topology refresh may restore them only from a complete
+                    // later snapshot.
+                    tracing::error!(
+                        error = %error,
+                        "committed action routing could not be published; command routes revoked"
+                    );
+                    Err(error)
+                },
+            };
+        }
+
+        // Compatibility path for tests that intentionally compose no
+        // production runtime topology.
         match aether_routing::load_routing_maps(self.manager.pool()).await {
             Ok(maps) => {
                 self.manager
@@ -162,29 +185,40 @@ impl AutomationActionRoutingMutator for SqliteActionRoutingMutator {
             | ActionRoutingMutation::DeleteAllActions => None,
         };
 
-        let mut transaction = self
-            .manager
-            .pool()
-            .begin()
-            .await
-            .map_err(|error| storage_error("begin action-routing mutation", error))?;
+        // Production revokes M2C before opening the mutation transaction and
+        // retains the refresh lease through commit + publication. Therefore a
+        // command can observe either the old generation before revocation or
+        // the complete committed generation after publication, never an old
+        // route during the commit-to-publish window.
+        let mut topology_lease = match self.manager.runtime_topology() {
+            Some(topology) => Some(Arc::clone(topology).begin_action_routing_mutation().await),
+            None => None,
+        };
 
-        let affected_routes = match mutation {
-            ActionRoutingMutation::Upsert { route } => {
-                let key = route.key();
-                let destination = route.destination();
-                let channel_type = match destination.kind() {
-                    PointKind::Command => "C",
-                    PointKind::Action => "A",
-                    PointKind::Telemetry | PointKind::Status => {
-                        return Err(PortError::new(
-                            PortErrorKind::InvalidData,
-                            "action route destination is not command-owned",
-                        ));
-                    },
-                };
-                sqlx::query(
-                    "INSERT INTO action_routing \
+        let staged_mutation: PortResult<_> = async {
+            let mut transaction = self
+                .manager
+                .pool()
+                .begin()
+                .await
+                .map_err(|error| storage_error("begin action-routing mutation", error))?;
+
+            let affected_routes = match mutation {
+                ActionRoutingMutation::Upsert { route } => {
+                    let key = route.key();
+                    let destination = route.destination();
+                    let channel_type = match destination.kind() {
+                        PointKind::Command => "C",
+                        PointKind::Action => "A",
+                        PointKind::Telemetry | PointKind::Status => {
+                            return Err(PortError::new(
+                                PortErrorKind::InvalidData,
+                                "action route destination is not command-owned",
+                            ));
+                        },
+                    };
+                    sqlx::query(
+                        "INSERT INTO action_routing \
                      (instance_id, instance_name, action_id, channel_id, channel_type, \
                       channel_point_id, enabled) \
                      VALUES (?, ?, ?, ?, ?, ?, ?) \
@@ -195,88 +229,117 @@ impl AutomationActionRoutingMutator for SqliteActionRoutingMutator {
                        channel_point_id = excluded.channel_point_id, \
                        enabled = excluded.enabled, \
                        updated_at = CURRENT_TIMESTAMP",
+                    )
+                    .bind(i64::from(key.instance_id().get()))
+                    .bind(upsert_instance_name.as_deref())
+                    .bind(i64::from(key.action_id().get()))
+                    .bind(i64::from(destination.channel_id().get()))
+                    .bind(channel_type)
+                    .bind(i64::from(destination.point_id().get()))
+                    .bind(route.enabled())
+                    .execute(&mut *transaction)
+                    .await
+                    .map_err(|error| storage_error("upsert action route", error))?
+                    .rows_affected()
+                },
+                ActionRoutingMutation::Delete { route_key } => sqlx::query(
+                    "DELETE FROM action_routing WHERE instance_id = ? AND action_id = ?",
                 )
-                .bind(i64::from(key.instance_id().get()))
-                .bind(upsert_instance_name.as_deref())
-                .bind(i64::from(key.action_id().get()))
-                .bind(i64::from(destination.channel_id().get()))
-                .bind(channel_type)
-                .bind(i64::from(destination.point_id().get()))
-                .bind(route.enabled())
+                .bind(i64::from(route_key.instance_id().get()))
+                .bind(i64::from(route_key.action_id().get()))
                 .execute(&mut *transaction)
                 .await
-                .map_err(|error| storage_error("upsert action route", error))?
-                .rows_affected()
-            },
-            ActionRoutingMutation::Delete { route_key } => {
-                sqlx::query("DELETE FROM action_routing WHERE instance_id = ? AND action_id = ?")
-                    .bind(i64::from(route_key.instance_id().get()))
-                    .bind(i64::from(route_key.action_id().get()))
-                    .execute(&mut *transaction)
-                    .await
-                    .map_err(|error| storage_error("delete action route", error))?
-                    .rows_affected()
-            },
-            ActionRoutingMutation::SetEnabled { route_key, enabled } => sqlx::query(
-                "UPDATE action_routing SET enabled = ?, updated_at = CURRENT_TIMESTAMP \
-                 WHERE instance_id = ? AND action_id = ?",
-            )
-            .bind(enabled)
-            .bind(i64::from(route_key.instance_id().get()))
-            .bind(i64::from(route_key.action_id().get()))
-            .execute(&mut *transaction)
-            .await
-            .map_err(|error| storage_error("change action-route state", error))?
-            .rows_affected(),
-            ActionRoutingMutation::DeleteActionsForInstance { instance_id } => {
-                sqlx::query("DELETE FROM action_routing WHERE instance_id = ?")
-                    .bind(i64::from(instance_id.get()))
-                    .execute(&mut *transaction)
-                    .await
-                    .map_err(|error| storage_error("delete instance action routes", error))?
-                    .rows_affected()
-            },
-            ActionRoutingMutation::DeleteActionsForChannel { channel_id } => {
-                sqlx::query("DELETE FROM action_routing WHERE channel_id = ?")
-                    .bind(i64::from(channel_id.get()))
-                    .execute(&mut *transaction)
-                    .await
-                    .map_err(|error| storage_error("delete channel action routes", error))?
-                    .rows_affected()
-            },
-            ActionRoutingMutation::DeleteAllActions => sqlx::query("DELETE FROM action_routing")
-                .execute(&mut *transaction)
-                .await
-                .map_err(|error| storage_error("delete all action routes", error))?
+                .map_err(|error| storage_error("delete action route", error))?
                 .rows_affected(),
+                ActionRoutingMutation::SetEnabled { route_key, enabled } => sqlx::query(
+                    "UPDATE action_routing SET enabled = ?, updated_at = CURRENT_TIMESTAMP \
+                 WHERE instance_id = ? AND action_id = ?",
+                )
+                .bind(enabled)
+                .bind(i64::from(route_key.instance_id().get()))
+                .bind(i64::from(route_key.action_id().get()))
+                .execute(&mut *transaction)
+                .await
+                .map_err(|error| storage_error("change action-route state", error))?
+                .rows_affected(),
+                ActionRoutingMutation::DeleteActionsForInstance { instance_id } => {
+                    sqlx::query("DELETE FROM action_routing WHERE instance_id = ?")
+                        .bind(i64::from(instance_id.get()))
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(|error| storage_error("delete instance action routes", error))?
+                        .rows_affected()
+                },
+                ActionRoutingMutation::DeleteActionsForChannel { channel_id } => {
+                    sqlx::query("DELETE FROM action_routing WHERE channel_id = ?")
+                        .bind(i64::from(channel_id.get()))
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(|error| storage_error("delete channel action routes", error))?
+                        .rows_affected()
+                },
+                ActionRoutingMutation::DeleteAllActions => {
+                    sqlx::query("DELETE FROM action_routing")
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(|error| storage_error("delete all action routes", error))?
+                        .rows_affected()
+                },
+            };
+
+            if matches!(
+                mutation,
+                ActionRoutingMutation::Delete { .. } | ActionRoutingMutation::SetEnabled { .. }
+            ) && affected_routes == 0
+            {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(|error| storage_error("roll back missing action route", error))?;
+                return Err(PortError::new(
+                    PortErrorKind::NotFound,
+                    "action route is not commissioned",
+                ));
+            }
+
+            Ok((transaction, affected_routes))
+        }
+        .await;
+
+        let (transaction, affected_routes) = match staged_mutation {
+            Ok(staged) => staged,
+            Err(error) => {
+                if let Some(topology_lease) = topology_lease.take() {
+                    topology_lease.restore().await;
+                }
+                return Err(error);
+            },
         };
 
-        if matches!(
-            mutation,
-            ActionRoutingMutation::Delete { .. } | ActionRoutingMutation::SetEnabled { .. }
-        ) && affected_routes == 0
-        {
-            transaction
-                .rollback()
-                .await
-                .map_err(|error| storage_error("roll back missing action route", error))?;
-            return Err(PortError::new(
-                PortErrorKind::NotFound,
-                "action route is not commissioned",
-            ));
+        // A commit error has an uncertain durable outcome. Disarm restoration
+        // before attempting it so neither `?` nor cancellation can republish a
+        // pre-commit generation over data that SQLite may already have applied.
+        if let Some(topology_lease) = topology_lease.as_mut() {
+            topology_lease.commit_started();
         }
-
         transaction
             .commit()
             .await
             .map_err(|error| storage_error("commit action-routing mutation", error))?;
-        self.publish_committed_routes().await?;
 
-        Ok(ActionRoutingMutationReceipt::new(
-            kind,
-            target,
-            affected_routes,
-        ))
+        match self.publish_committed_routes(topology_lease).await {
+            Ok(()) => Ok(ActionRoutingMutationReceipt::new(
+                kind,
+                target,
+                affected_routes,
+            )),
+            Err(failure) => Ok(ActionRoutingMutationReceipt::commands_revoked(
+                kind,
+                target,
+                affected_routes,
+                failure,
+            )),
+        }
     }
 }
 

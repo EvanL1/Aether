@@ -47,7 +47,7 @@ mod test_support;
 mod ws;
 
 use crate::config::GatewayConfig;
-use crate::live_values::build_gateway_value_source;
+use crate::live_values::{build_gateway_value_source, run_gateway_topology_refresh};
 #[cfg(feature = "swagger-ui")]
 use crate::routes_data_processing::DataProcessingApiDoc;
 use crate::state::AppState;
@@ -506,11 +506,18 @@ async fn main() -> anyhow::Result<()> {
     db::init_roles(&db_pool).await?;
     db::init_calculated_points(&db_pool).await?;
 
+    let live_values = build_gateway_value_source(&db_pool, &cfg).await?;
+
     // Data Processing is composed only after explicit deployment opt-in. A
     // disabled deployment neither constructs source/processor clients nor
-    // mounts the corresponding HTTP routes.
-    let data_processing =
-        data_processing_runtime::build_data_processing_application(&db_pool, &cfg).await?;
+    // mounts the corresponding HTTP routes. Its read-only live state shares
+    // the gateway's atomically refreshed topology generation.
+    let data_processing = data_processing_runtime::build_data_processing_application(
+        &db_pool,
+        &cfg,
+        Arc::clone(&live_values),
+    )
+    .await?;
 
     // ── Bootstrap admin user ──────────────────────────────────────────────────
     ensure_bootstrap_admin(&db_pool, || {
@@ -519,8 +526,7 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     // ── App State ─────────────────────────────────────────────────────────────
-    let live_values = build_gateway_value_source(&db_pool, &cfg).await?;
-    let ws_hub = WsHub::new(live_values, db_pool.clone());
+    let ws_hub = WsHub::new(live_values.clone(), db_pool.clone());
 
     let state = Arc::new(AppState {
         db: db_pool,
@@ -532,6 +538,20 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Background tasks ──────────────────────────────────────────────────────
     let shutdown = CancellationToken::new();
+
+    let topology_source = Arc::clone(&live_values);
+    let topology_db = state.db.clone();
+    let topology_config = state.config.as_ref().clone();
+    let topology_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        run_gateway_topology_refresh(
+            topology_source,
+            topology_db,
+            topology_config,
+            topology_shutdown,
+        )
+        .await;
+    });
 
     let hb_hub = Arc::clone(&ws_hub);
     let hb_shutdown = shutdown.clone();

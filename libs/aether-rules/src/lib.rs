@@ -56,7 +56,7 @@ pub use action_command::{RuleActionCommand, RuleActionCommandFacade};
 #[cfg(unix)]
 pub use executor::{ActionResult, RuleExecutionResult, RuleExecutor};
 #[cfg(unix)]
-pub use live_state::{MemoryRuleLiveState, RuleLiveState};
+pub use live_state::{MemoryRuleLiveState, RuleExecutionContext, RuleLiveState};
 #[cfg(unix)]
 pub use logger::{RuleLogger, RuleLoggerManager, format_conditions};
 #[cfg(unix)]

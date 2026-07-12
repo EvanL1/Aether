@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use aether_domain::{AlarmRuleId, AlarmSeverity, AlertId, TimestampMs};
+use aether_domain::{AlarmRuleId, AlarmSeverity, AlertId, ChannelId, TimestampMs};
 use aether_ports::{
     AcquisitionStateWriter, AlarmRuleMutation, AlarmRuleMutationKind, AlarmRuleMutator,
-    AlarmRulePatch, AlertResolutionReceipt, AlertResolver, AuditSink, CommandDispatcher,
-    DeviceCommandSink, DurableOutbox, HistorySink, LiveState, LiveStateWriter, PortError,
-    PortErrorKind, StateMirror,
+    AlarmRulePatch, AlertResolutionReceipt, AlertResolver, AuditSink, ChannelHealthObservation,
+    ChannelHealthSource, CommandDispatcher, DeviceCommandSink, DurableOutbox, HistorySink,
+    LiveState, LiveStateWriter, PortError, PortErrorKind, StateMirror,
 };
 
 #[test]
@@ -39,6 +39,7 @@ fn extension_ports_are_object_safe() {
     fn accepts_audit(_: Option<Arc<dyn AuditSink>>) {}
     fn accepts_alarm_rule_mutator(_: Option<Arc<dyn AlarmRuleMutator>>) {}
     fn accepts_alert_resolver(_: Option<Arc<dyn AlertResolver>>) {}
+    fn accepts_channel_health(_: Option<Arc<dyn ChannelHealthSource>>) {}
 
     accepts_live_state(None);
     accepts_live_state_writer(None);
@@ -51,6 +52,20 @@ fn extension_ports_are_object_safe() {
     accepts_audit(None);
     accepts_alarm_rule_mutator(None);
     accepts_alert_resolver(None);
+    accepts_channel_health(None);
+}
+
+#[test]
+fn channel_health_observation_preserves_typed_identity_and_time() {
+    let observation =
+        ChannelHealthObservation::new(ChannelId::new(7), true, TimestampMs::new(1_720_000_000_000));
+
+    assert_eq!(observation.channel_id(), ChannelId::new(7));
+    assert!(observation.online());
+    assert_eq!(
+        observation.observed_at(),
+        TimestampMs::new(1_720_000_000_000)
+    );
 }
 
 #[test]

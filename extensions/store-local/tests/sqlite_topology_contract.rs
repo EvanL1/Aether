@@ -105,6 +105,74 @@ async fn snapshot_rejects_negative_point_ranges() {
 }
 
 #[tokio::test]
+async fn snapshot_rejects_a_negative_point_hidden_below_a_valid_maximum() {
+    let pool = topology_pool().await;
+    sqlx::query("INSERT INTO channels (channel_id, protocol) VALUES (1, 'modbus-tcp')")
+        .execute(&pool)
+        .await
+        .expect("configured channel");
+    for point_id in [-2_i64, 2] {
+        sqlx::query("INSERT INTO telemetry_points (channel_id, point_id) VALUES (1, ?)")
+            .bind(point_id)
+            .execute(&pool)
+            .await
+            .expect("mixed point range");
+    }
+
+    let error = load_sqlite_shm_topology(&pool)
+        .await
+        .expect_err("a valid maximum must not hide a negative point id");
+
+    assert_eq!(error.kind(), PortErrorKind::InvalidData);
+}
+
+#[tokio::test]
+async fn snapshot_accepts_sparse_nonzero_point_ranges_and_allocates_the_upper_bound() {
+    let pool = topology_pool().await;
+    sqlx::query("INSERT INTO channels (channel_id, protocol) VALUES (1, 'modbus-tcp')")
+        .execute(&pool)
+        .await
+        .expect("configured channel");
+    for point_id in [2_i64, 100] {
+        sqlx::query("INSERT INTO telemetry_points (channel_id, point_id) VALUES (1, ?)")
+            .bind(point_id)
+            .execute(&pool)
+            .await
+            .expect("sparse configured point");
+    }
+
+    let snapshot = load_sqlite_shm_topology(&pool)
+        .await
+        .expect("sparse point ids are part of the physical writer contract");
+
+    assert_eq!(
+        snapshot.point_manifest().counts().get(&1),
+        Some(&[101, 0, 0, 0])
+    );
+}
+
+#[tokio::test]
+async fn snapshot_rejects_duplicate_point_identifiers() {
+    let pool = topology_pool().await;
+    sqlx::query("INSERT INTO channels (channel_id, protocol) VALUES (1, 'modbus-tcp')")
+        .execute(&pool)
+        .await
+        .expect("configured channel");
+    for _ in 0..2 {
+        sqlx::query("INSERT INTO telemetry_points (channel_id, point_id) VALUES (1, 7)")
+            .execute(&pool)
+            .await
+            .expect("duplicate point row");
+    }
+
+    let error = load_sqlite_shm_topology(&pool)
+        .await
+        .expect_err("duplicate point identities must not collapse into one SHM slot");
+
+    assert_eq!(error.kind(), PortErrorKind::InvalidData);
+}
+
+#[tokio::test]
 async fn snapshot_reports_an_unavailable_authoritative_schema() {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

@@ -16,11 +16,12 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::core::authority::AuthorityReadGuard;
+use crate::core::authority::{AuthorityReadGuard, AuthorityWriteGuard};
 use crate::core::header::{
     HeaderSnapshot, UNIFIED_MAGIC, UNIFIED_VERSION, UnifiedHeader, calculate_file_size,
     slot_offset, validate_mapping_layout,
 };
+use crate::core::reader::SlotReader;
 use crate::core::slot::PointSlot;
 use crate::core::slot_io::{SlotIo, SlotIoWrite, SlotRead};
 use crate::{DataplaneError, DataplaneResult};
@@ -91,6 +92,37 @@ pub struct SlotWriter {
     /// calls so io can drain changed slots in O(dirty_words +
     /// dirty_slots), with periodic full scans as fallback.
     pub(crate) dirty_words: Vec<AtomicU64>,
+}
+
+/// Rollback-safe invalidation of one writer generation before canonical swap.
+///
+/// Readers retain old mmaps after `rename(2)`. Marking the old header odd
+/// before publication makes those mappings fail validation immediately,
+/// without waiting for an inode polling interval. If publication fails before
+/// the rename, dropping this guard restores the original stable generation.
+#[must_use = "the invalidation must be committed after the canonical rename"]
+pub struct GenerationInvalidation<'writer> {
+    writer: &'writer SlotWriter,
+    original_generation: u64,
+    committed: bool,
+}
+
+impl GenerationInvalidation<'_> {
+    /// Keeps the old mapping invalid after a successful canonical rename.
+    pub fn commit(mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for GenerationInvalidation<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.writer
+                .header()
+                .writer_generation
+                .store(self.original_generation, Ordering::Release);
+        }
+    }
 }
 
 impl SlotWriter {
@@ -243,6 +275,40 @@ impl SlotWriter {
         )
     }
 
+    /// Opens the stable canonical generation solely so a replacement can
+    /// invalidate retained mappings before `rename(2)`.
+    ///
+    /// A missing path, or a generation already marked unstable by an earlier
+    /// interrupted replacement, needs no additional invalidation. The caller
+    /// must retain the exclusive authority lease through the eventual rename.
+    pub fn open_canonical_for_replacement(
+        path: impl AsRef<Path>,
+        authority: &AuthorityWriteGuard,
+    ) -> DataplaneResult<Option<Self>> {
+        let path = path.as_ref();
+        if !authority.guards(path) {
+            return Err(DataplaneError::InvalidPath(path.to_path_buf()));
+        }
+        let reader = match SlotReader::open(path) {
+            Ok(reader) => reader,
+            Err(DataplaneError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(None);
+            },
+            Err(error) => return Err(error),
+        };
+        let header = reader.header();
+        if header.writer_generation == 0 || header.writer_generation & 1 != 0 {
+            return Ok(None);
+        }
+        drop(reader);
+
+        let writer = Self::open_existing(path, header.slot_count as usize, header.routing_hash)?;
+        writer.validate_authoritative_path()?;
+        Ok(Some(writer))
+    }
+
     /// Wraps an already-initialized mmap region after validating its bounds.
     ///
     /// The mmap is expected to:
@@ -384,6 +450,45 @@ impl SlotWriter {
             "mapped SHM file at {:?} is no longer the authoritative path target",
             self.path
         )))
+    }
+
+    /// Invalidates this stable generation while an exclusive canonical-path
+    /// lease is held.
+    ///
+    /// Callers create the replacement completely before entering this step,
+    /// then commit the returned guard only after the atomic rename succeeds.
+    pub fn begin_generation_swap(
+        &self,
+        authority: &AuthorityWriteGuard,
+    ) -> DataplaneResult<GenerationInvalidation<'_>> {
+        if !authority.guards(&self.path) {
+            return Err(DataplaneError::InvalidPath(self.path.clone()));
+        }
+        self.validate_authoritative_path()?;
+        let generation = self.header().writer_generation.load(Ordering::Acquire);
+        if generation == 0 || generation & 1 != 0 {
+            return Err(DataplaneError::InvalidLayout(format!(
+                "writer generation {generation} is not stable before canonical replacement"
+            )));
+        }
+        self.header()
+            .writer_generation
+            .compare_exchange(
+                generation,
+                generation | 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map_err(|observed| {
+                DataplaneError::InvalidLayout(format!(
+                    "writer generation changed from {generation} to {observed} before canonical replacement"
+                ))
+            })?;
+        Ok(GenerationInvalidation {
+            writer: self,
+            original_generation: generation,
+            committed: false,
+        })
     }
 
     /// Acquires a shared transaction lease for this writer's canonical path.
@@ -542,5 +647,29 @@ impl SlotIoWrite for SlotWriter {
 
     fn take_dirty_slots(&self) -> Vec<usize> {
         SlotWriter::take_dirty_slots(self)
+    }
+}
+
+#[cfg(test)]
+mod generation_invalidation_tests {
+    use super::*;
+
+    #[test]
+    fn dropped_invalidation_restores_the_canonical_generation() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("live.shm");
+        let writer = SlotWriter::create(&path, 8, 1, 0xA37E).expect("published writer");
+        let stable_generation = writer.generation();
+        let authority = AuthorityWriteGuard::acquire(&path).expect("replacement authority");
+
+        {
+            let invalidation = writer
+                .begin_generation_swap(&authority)
+                .expect("invalidate stable generation");
+            assert_eq!(writer.generation(), stable_generation | 1);
+            drop(invalidation);
+        }
+
+        assert_eq!(writer.generation(), stable_generation);
     }
 }

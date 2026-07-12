@@ -114,6 +114,14 @@ pub async fn apply(
             "action-routing mutation completed but terminal audit is incomplete; do not retry"
         );
     }
+    if let Some(failure) = acceptance.runtime_status().failure() {
+        tracing::error!(
+            request_id = acceptance.request_id(),
+            operation = acceptance.kind().as_str(),
+            error = %failure,
+            "action-routing mutation committed but runtime publication failed; commands remain revoked and the request must not be retried"
+        );
+    }
     Ok(acceptance)
 }
 
@@ -122,6 +130,7 @@ pub fn response_data(
     acceptance: &ActionRoutingMutationAcceptance,
     message: impl Into<String>,
 ) -> Value {
+    let runtime = acceptance.runtime_status();
     json!({
         "message": message.into(),
         "request_id": acceptance.request_id(),
@@ -130,6 +139,13 @@ pub fn response_data(
         "audit": crate::infra::application_control::completion_audit_response(
             acceptance.completion_audit()
         ),
+        "runtime": {
+            "status": runtime.as_str(),
+            "reconciliation_required": runtime.reconciliation_required(),
+            "message": runtime.failure().map(|_| {
+                "command routing is disabled until topology reconciliation succeeds"
+            })
+        },
         "retryable": acceptance.is_retryable()
     })
 }

@@ -1,5 +1,6 @@
 use std::env;
 
+#[derive(Clone)]
 pub struct GatewayConfig {
     pub api_host: String,
     pub api_port: u16,
@@ -7,6 +8,7 @@ pub struct GatewayConfig {
     pub channel_health_shm_path: String,
     pub shm_writer_stale_after_ms: u64,
     pub shm_identity_check_interval_ms: u64,
+    pub shm_topology_refresh_interval_ms: u64,
     pub point_watch_socket: String,
     pub point_watch_debounce_ms: u64,
     pub db_path: String,
@@ -45,6 +47,10 @@ impl Default for GatewayConfig {
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(250),
+            shm_topology_refresh_interval_ms: env::var("SHM_TOPOLOGY_REFRESH_INTERVAL_MS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1_000),
             point_watch_socket: env::var("AETHER_API_POINT_WATCH_SOCKET").unwrap_or_else(|_| {
                 aether_shm_bridge::point_watch_socket_from_shm(&shm_path, "api")
                     .to_string_lossy()

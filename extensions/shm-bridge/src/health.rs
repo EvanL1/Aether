@@ -8,7 +8,10 @@ use std::sync::{Arc, RwLock};
 
 use aether_dataplane::core::config::{commit_generation_swap_locked, generation_file_path};
 use aether_dataplane::{AuthorityWriteGuard, SlotIo, SlotIoWrite, SlotWriter};
-use aether_ports::{PortError, PortErrorKind, PortResult};
+use aether_domain::{ChannelId, TimestampMs};
+use aether_ports::{
+    ChannelHealthObservation, ChannelHealthSource, PortError, PortErrorKind, PortResult,
+};
 use arc_swap::ArcSwapOption;
 
 use crate::managed::map_dataplane_error;
@@ -67,27 +70,6 @@ impl ChannelHealthManifest {
     /// Iterates the configured ids in deterministic order.
     pub fn channel_ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.channel_ids.iter().copied()
-    }
-}
-
-/// One connectivity sample read from the channel-health SHM plane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChannelHealthSample {
-    online: bool,
-    timestamp_ms: u64,
-}
-
-impl ChannelHealthSample {
-    /// Returns whether the channel was online at the sample timestamp.
-    #[must_use]
-    pub const fn online(self) -> bool {
-        self.online
-    }
-
-    /// Returns when the connectivity state was observed.
-    #[must_use]
-    pub const fn timestamp_ms(self) -> u64 {
-        self.timestamp_ms
     }
 }
 
@@ -370,8 +352,27 @@ fn publish_health_writer(
         staging_writer.update_heartbeat(previous.writer_heartbeat());
     }
     staging_writer.flush().map_err(map_dataplane_error)?;
+    let discovered_previous = if previous.is_none() {
+        SlotWriter::open_canonical_for_replacement(canonical_path, authority)
+            .map_err(map_dataplane_error)?
+    } else {
+        None
+    };
+    let previous_writer = previous
+        .map(|previous| previous.writer.as_ref())
+        .or(discovered_previous.as_ref());
+    let invalidation = previous_writer
+        .map(|writer| {
+            writer
+                .begin_generation_swap(authority)
+                .map_err(map_dataplane_error)
+        })
+        .transpose()?;
     commit_generation_swap_locked(&staging_path, canonical_path, authority)
         .map_err(map_dataplane_error)?;
+    if let Some(invalidation) = invalidation {
+        invalidation.commit();
+    }
     cleanup.0 = None;
     drop(staging_writer);
 
@@ -450,12 +451,31 @@ impl ShmChannelHealthReader {
         }
     }
 
+    /// Eagerly validates the health-plane layout for topology publication.
+    pub fn validate_layout(&self) -> PortResult<()> {
+        self.source.validate_layout(self.manifest.slot_count())
+    }
+
+    /// Returns the immutable health manifest paired with this reader.
+    #[must_use]
+    pub fn manifest(&self) -> &Arc<ChannelHealthManifest> {
+        &self.manifest
+    }
+
     /// Reads a channel state. `None` means unconfigured or not observed yet.
-    pub fn read_channel(&self, channel_id: u32) -> PortResult<Option<ChannelHealthSample>> {
-        if !self.manifest.contains(channel_id) {
+    pub fn read_channel(&self, channel_id: u32) -> PortResult<Option<ChannelHealthObservation>> {
+        self.read_observation(ChannelId::new(channel_id))
+    }
+
+    fn read_observation(
+        &self,
+        channel_id: ChannelId,
+    ) -> PortResult<Option<ChannelHealthObservation>> {
+        let channel_id_value = channel_id.get();
+        if !self.manifest.contains(channel_id_value) {
             return Ok(None);
         }
-        let Some(sample) = self.source.read_slot(channel_id as usize)? else {
+        let Some(sample) = self.source.read_slot(channel_id_value as usize)? else {
             return Ok(None);
         };
         let online = match sample.value() {
@@ -465,14 +485,21 @@ impl ShmChannelHealthReader {
             value => {
                 return Err(PortError::new(
                     PortErrorKind::InvalidData,
-                    format!("channel {channel_id} has invalid health value {value}"),
+                    format!("channel {channel_id_value} has invalid health value {value}"),
                 ));
             },
         };
-        Ok(Some(ChannelHealthSample {
+        Ok(Some(ChannelHealthObservation::new(
+            channel_id,
             online,
-            timestamp_ms: sample.timestamp_ms(),
-        }))
+            TimestampMs::new(sample.timestamp_ms()),
+        )))
+    }
+}
+
+impl ChannelHealthSource for ShmChannelHealthReader {
+    fn read_channel(&self, channel_id: ChannelId) -> PortResult<Option<ChannelHealthObservation>> {
+        self.read_observation(channel_id)
     }
 }
 

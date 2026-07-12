@@ -57,7 +57,13 @@ aether-automation, and aether-io.
    `device.control` permission, and sets explicit confirmation. The existing
    safety policy still evaluates that permission and confirmation; the facade
    does not bypass authorization. This applies equally to scheduled rules and
-   manually triggered rules.
+   manually triggered rules. A production rule execution captures the current
+   automation topology sequence before its first live-state read. Every read
+   validates that sequence, and each derived command carries it as an opaque
+   fence through `ControlApplication`; the automation dispatcher pins its
+   command generation and rejects a mismatch before resolving a physical
+   route. Manual HTTP, CLI, and MCP commands intentionally use the currently
+   pinned topology without a derived-decision fence.
 10. The former CLI/MCP `models instances measurement` surface is removed rather
     than preserved as a compatibility shim. Automation has no matching HTTP
     route and must not gain a `LiveStateWriter` to recreate one. Synthetic T/S
@@ -106,12 +112,17 @@ aether-automation, and aether-io.
 - Every valid rule device action has a distinct command/audit correlation ID;
   while the audit sink remains available, `ControlApplication` persists an
   attempted plus terminal succeeded/failed pair.
+- A rule cannot read inputs from one topology generation and dispatch its
+  derived command through another generation.
 - The public command surface has one device-control operation instead of
   competing instance and direct-channel variants.
 - Physical command topology changes are signed, confirmed, audited, and
   correlated consistently across HTTP, CLI, and MCP.
 - A failed routing publication revokes the runtime map instead of leaving a
   previously commissioned command target active.
+- Once an action-routing mutation commits, publication failure is returned as
+  a non-retryable accepted receipt with `runtime.status=commands_revoked`, not
+  as a transport error that could cause the durable mutation to be repeated.
 
 ### Negative
 

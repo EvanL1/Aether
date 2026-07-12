@@ -5,13 +5,16 @@ use aether_application::{ControlApplication, SafetyPolicy};
 use aether_automation::infra::application_control::{
     COMMISSIONED_RULE_ACTOR_ID, RuleActionApplication,
 };
-use aether_domain::{ControlCommand, TimestampMs};
+use aether_domain::{ControlCommand, InstanceId, PointId, TimestampMs};
 use aether_ports::{
-    AuditOutcome, AuditRecord, AuditSink, CommandDispatcher, CommandReceipt, PortError,
-    PortErrorKind, PortResult,
+    AuditOutcome, AuditRecord, AuditSink, CommandDispatcher, CommandReceipt, CommandTopologyFence,
+    PortError, PortErrorKind, PortResult,
 };
 use aether_routing::RoutingCache;
-use aether_rules::{MemoryRuleLiveState, Rule, RuleExecutor, extract_rule_flow};
+use aether_rules::{
+    MemoryRuleLiveState, Rule, RuleActionCommand, RuleActionCommandFacade, RuleExecutor,
+    extract_rule_flow,
+};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -57,6 +60,7 @@ impl AuditSink for RecordingAudit {
 #[derive(Default)]
 struct RecordingDispatcher {
     commands: Mutex<Vec<ControlCommand>>,
+    fences: Mutex<Vec<CommandTopologyFence>>,
     reject: bool,
 }
 
@@ -64,12 +68,20 @@ impl RecordingDispatcher {
     fn rejecting() -> Self {
         Self {
             commands: Mutex::new(Vec::new()),
+            fences: Mutex::new(Vec::new()),
             reject: true,
         }
     }
 
     fn commands(&self) -> Vec<ControlCommand> {
         self.commands
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn fences(&self) -> Vec<CommandTopologyFence> {
+        self.fences
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
@@ -93,6 +105,18 @@ impl CommandDispatcher for RecordingDispatcher {
             command.id(),
             TimestampMs::new(command.issued_at().get().saturating_add(1)),
         ))
+    }
+
+    async fn dispatch_fenced(
+        &self,
+        command: ControlCommand,
+        fence: CommandTopologyFence,
+    ) -> PortResult<CommandReceipt> {
+        self.fences
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(fence);
+        self.dispatch(command).await
     }
 }
 
@@ -253,6 +277,33 @@ async fn production_rule_actions_use_control_application_without_legacy_dispatch
                 .any(|command| command.id().get() == request_uuid.as_u128())
         );
     }
+}
+
+#[tokio::test]
+async fn rule_action_application_preserves_the_execution_topology_fence() {
+    let dispatcher = Arc::new(RecordingDispatcher::default());
+    let audit = Arc::new(RecordingAudit::default());
+    let application = Arc::new(ControlApplication::new(
+        Arc::clone(&dispatcher) as Arc<dyn CommandDispatcher>,
+        Arc::clone(&audit) as Arc<dyn AuditSink>,
+        SafetyPolicy,
+    ));
+    let action_application = RuleActionApplication::new(application);
+    let fence = CommandTopologyFence::new(19);
+    let command = RuleActionCommand::new(InstanceId::new(42), PointId::new(7), 12.5)
+        .with_topology_fence(fence);
+
+    RuleActionCommandFacade::write_action(&action_application, command)
+        .await
+        .expect("fenced rule action reaches the control application");
+
+    assert_eq!(dispatcher.fences(), vec![fence]);
+    assert_eq!(dispatcher.commands().len(), 1);
+    assert!(audit.records().iter().all(|record| {
+        record
+            .detail()
+            .is_some_and(|detail| detail.contains("expected_topology_sequence=19"))
+    }));
 }
 
 #[tokio::test]

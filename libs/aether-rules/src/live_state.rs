@@ -3,8 +3,45 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
+use aether_ports::CommandTopologyFence;
+
 type InstancePointKey = (u32, u8, u32);
 type TimestampedValue = (f64, u64);
+
+/// Immutable context captured once before a rule begins reading live state.
+///
+/// Production attaches the current automation topology sequence. Every read in
+/// that execution may validate the context, and every derived device action
+/// carries the same fence to the command dispatcher. Test and compatibility
+/// adapters remain explicitly unfenced.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuleExecutionContext {
+    command_topology_fence: Option<CommandTopologyFence>,
+}
+
+impl RuleExecutionContext {
+    /// Creates a compatibility context without a runtime topology fence.
+    #[must_use]
+    pub const fn unfenced() -> Self {
+        Self {
+            command_topology_fence: None,
+        }
+    }
+
+    /// Creates an execution context tied to one exact topology publication.
+    #[must_use]
+    pub const fn topology_fenced(fence: CommandTopologyFence) -> Self {
+        Self {
+            command_topology_fence: Some(fence),
+        }
+    }
+
+    /// Returns the fence that every command derived by this execution must use.
+    #[must_use]
+    pub const fn command_topology_fence(self) -> Option<CommandTopologyFence> {
+        self.command_topology_fence
+    }
+}
 
 /// Read-only live state consumed by rule evaluation.
 ///
@@ -12,6 +49,14 @@ type TimestampedValue = (f64, u64);
 /// trait exists so unit tests can supply deterministic values without creating
 /// an mmap file.
 pub trait RuleLiveState: Send + Sync {
+    /// Captures one context before the first read in a rule execution.
+    ///
+    /// The default preserves deterministic test and compatibility adapters. A
+    /// production topology-aware adapter should return a fenced context.
+    fn begin_execution(&self) -> RuleExecutionContext {
+        RuleExecutionContext::unfenced()
+    }
+
     /// Read `(value, timestamp_ms)` for an instance point.
     /// `instance_type` is `0` for Measurement and `1` for Action.
     fn get_instance(
@@ -20,6 +65,20 @@ pub trait RuleLiveState: Send + Sync {
         instance_type: u8,
         point_id: u32,
     ) -> Option<(f64, u64)>;
+
+    /// Reads one point under a previously captured execution context.
+    ///
+    /// The default delegates to the compatibility read. Topology-aware adapters
+    /// override this to reject a read after the captured generation changes.
+    fn get_instance_for_execution(
+        &self,
+        _execution: RuleExecutionContext,
+        instance_id: u32,
+        instance_type: u8,
+        point_id: u32,
+    ) -> Option<(f64, u64)> {
+        self.get_instance(instance_id, instance_type, point_id)
+    }
 }
 
 /// Deterministic in-process adapter for tests and simulations.

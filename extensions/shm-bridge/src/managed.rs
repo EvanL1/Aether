@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use aether_dataplane::{DataplaneError, SlotIo, SlotReader};
+use aether_dataplane::{AuthorityReadGuard, DataplaneError, SlotIo, SlotReader};
 use aether_ports::{PortError, PortErrorKind, PortResult};
 
 use crate::{SlotSnapshot, SlotSource};
@@ -58,6 +58,12 @@ impl ShmClientConfig {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Returns the opaque layout fingerprint required by this client.
+    #[must_use]
+    pub const fn expected_layout_hash(&self) -> u64 {
+        self.expected_layout_hash
     }
 }
 
@@ -126,6 +132,40 @@ impl ReconnectingSlotSource {
             config,
             state: RwLock::new(ClientState::default()),
         }
+    }
+
+    /// Eagerly validates the physical layout without requiring a fresh writer
+    /// heartbeat.
+    ///
+    /// Topology supervisors use this before publishing a candidate generation.
+    /// Ordinary reads still enforce the configured heartbeat freshness policy.
+    pub fn validate_layout(&self, expected_slot_count: usize) -> PortResult<()> {
+        self.ensure_current()?;
+        let state = self.read_state()?;
+        let opened = state.opened.as_ref().ok_or_else(|| {
+            PortError::new(PortErrorKind::Unavailable, "SHM reader is not connected")
+        })?;
+        let header = opened.reader.header();
+        let generation = opened.reader.generation();
+        if header.slot_count as usize != expected_slot_count {
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                format!(
+                    "SHM slot count {} does not match expected topology slot count {expected_slot_count}",
+                    header.slot_count
+                ),
+            ));
+        }
+        if generation != opened.generation || generation == 0 || generation & 1 != 0 {
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                format!(
+                    "SHM generation changed from {} to {generation} during layout validation",
+                    opened.generation
+                ),
+            ));
+        }
+        Ok(())
     }
 
     fn ensure_current(&self) -> PortResult<()> {
@@ -202,11 +242,13 @@ impl ReconnectingSlotSource {
     }
 
     fn open_current(&self) -> PortResult<OpenReader> {
+        let _authority =
+            AuthorityReadGuard::acquire(&self.config.path).map_err(map_dataplane_error)?;
         let reader = SlotReader::open(&self.config.path).map_err(map_dataplane_error)?;
         let header = reader.header();
         if header.routing_hash != self.config.expected_layout_hash {
             return Err(PortError::new(
-                PortErrorKind::InvalidData,
+                PortErrorKind::Conflict,
                 format!(
                     "SHM manifest mismatch at {:?}: expected 0x{:016X}, got 0x{:016X}",
                     self.config.path, self.config.expected_layout_hash, header.routing_hash
@@ -238,7 +280,18 @@ impl ReconnectingSlotSource {
             PortError::new(PortErrorKind::Unavailable, "SHM reader is not connected")
         })?;
         validate_writer_freshness(&opened.reader, self.config.writer_stale_after)?;
-        read(&opened.reader)
+        let value = read(&opened.reader)?;
+        let generation = opened.reader.generation();
+        if generation != opened.generation || generation & 1 != 0 {
+            return Err(PortError::new(
+                PortErrorKind::Conflict,
+                format!(
+                    "SHM generation changed from {} to {generation} during the read",
+                    opened.generation
+                ),
+            ));
+        }
+        Ok(value)
     }
 
     fn read_state(&self) -> PortResult<std::sync::RwLockReadGuard<'_, ClientState>> {

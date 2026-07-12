@@ -3,7 +3,8 @@ use std::sync::Arc;
 use aether_domain::{ChannelCommandAddress, ChannelId, InstanceId, PointId, PointKind};
 use aether_ports::{
     ActionRoute, ActionRouteKey, ActionRoutingMutation, ActionRoutingMutationKind,
-    ActionRoutingMutationReceipt, ActionRoutingTarget, AutomationActionRoutingMutator,
+    ActionRoutingMutationReceipt, ActionRoutingRuntimeStatus, ActionRoutingTarget,
+    AutomationActionRoutingMutator, PortError, PortErrorKind,
 };
 
 fn route_key() -> ActionRouteKey {
@@ -91,6 +92,36 @@ fn mutation_receipt_preserves_operation_target_and_affected_count() {
     assert_eq!(receipt.route_key(), Some(route_key()));
     assert_eq!(receipt.target(), ActionRoutingTarget::Route(route_key()));
     assert_eq!(receipt.affected_routes(), 1);
+    assert!(receipt.runtime_status().is_published());
+    assert!(!receipt.runtime_status().reconciliation_required());
+}
+
+#[test]
+fn committed_receipt_can_report_fail_closed_runtime_degradation_without_becoming_an_error() {
+    let receipt = ActionRoutingMutationReceipt::commands_revoked(
+        ActionRoutingMutationKind::Upsert,
+        ActionRoutingTarget::Route(route_key()),
+        1,
+        PortError::new(
+            PortErrorKind::Unavailable,
+            "physical topology is incomplete",
+        ),
+    );
+
+    assert_eq!(receipt.runtime_status().as_str(), "commands_revoked");
+    assert!(receipt.runtime_status().reconciliation_required());
+    assert_eq!(
+        receipt
+            .runtime_status()
+            .failure()
+            .expect("retained publication failure")
+            .kind(),
+        PortErrorKind::Unavailable
+    );
+    assert!(matches!(
+        receipt.runtime_status(),
+        ActionRoutingRuntimeStatus::CommandsRevoked { .. }
+    ));
 }
 
 #[test]

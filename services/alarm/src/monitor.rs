@@ -128,19 +128,18 @@ async fn check_event_batch(
     first: PointWatchEvent,
     shutdown: &CancellationToken,
 ) {
-    let mut slots = HashSet::new();
-    if let Ok(slot) = usize::try_from(first.slot_index()) {
-        slots.insert(slot);
-    }
+    let mut events = vec![first];
     tokio::select! {
         _ = shutdown.cancelled() => return,
         _ = tokio::time::sleep(Duration::from_millis(state.config.point_watch_debounce_ms)) => {}
     }
     while let Ok(event) = event_rx.try_recv() {
-        if let Ok(slot) = usize::try_from(event.slot_index()) {
-            slots.insert(slot);
-        }
+        events.push(event);
     }
+    let slots = events
+        .into_iter()
+        .filter_map(|event| state.live_values.validated_point_watch_slot(event))
+        .collect::<HashSet<_>>();
     if slots.is_empty() {
         return;
     }

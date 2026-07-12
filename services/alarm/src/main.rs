@@ -25,7 +25,7 @@ mod state;
 
 use crate::broadcast::Broadcaster;
 use crate::config::AlarmConfig;
-use crate::live_values::build_shm_alarm_source;
+use crate::live_values::{AlarmValueSource, build_shm_alarm_source, run_alarm_topology_refresh};
 use crate::models::MonitorStatus;
 use crate::state::AppState;
 
@@ -104,10 +104,11 @@ async fn main() -> anyhow::Result<()> {
         last_check_time: None,
         check_interval: cfg.data_fetch_interval,
     }));
+    let state_live_values: Arc<dyn AlarmValueSource> = live_values.clone();
 
     let state = Arc::new(AppState {
         db: db_pool,
-        live_values,
+        live_values: state_live_values,
         config: Arc::new(cfg.clone()),
         broadcaster,
         monitor_status,
@@ -118,6 +119,20 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Background tasks ──────────────────────────────────────────────────────
     let shutdown = CancellationToken::new();
+
+    let topology_source = Arc::clone(&live_values);
+    let topology_pool = state.db.clone();
+    let topology_config = cfg.clone();
+    let topology_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        run_alarm_topology_refresh(
+            topology_source,
+            topology_pool,
+            topology_config,
+            topology_shutdown,
+        )
+        .await;
+    });
 
     let monitor_state = Arc::clone(&state);
     let monitor_shutdown = shutdown.clone();

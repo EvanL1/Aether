@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use dashmap::DashMap;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tracing::{debug, error, info, warn};
 
 use crate::config::TopologyNode;
@@ -60,6 +60,11 @@ pub struct InstanceManager {
     /// Self-healing SHM reader for per-channel online/offline state.
     pub(crate) channel_health_reader:
         arc_swap::ArcSwapOption<aether_shm_bridge::ShmChannelHealthReader>,
+    /// Production runtime view that pins point, health, and logical routing
+    /// to one service generation. Legacy fields above remain only for staged
+    /// compatibility with narrow adapter tests.
+    pub(crate) runtime_topology:
+        OnceLock<Arc<crate::infra::runtime_topology::AutomationTopologyHandle>>,
 }
 
 impl InstanceManager {
@@ -75,7 +80,29 @@ impl InstanceManager {
             name_cache: DashMap::new(),
             live_reader: arc_swap::ArcSwapOption::empty(),
             channel_health_reader: arc_swap::ArcSwapOption::empty(),
+            runtime_topology: OnceLock::new(),
         }
+    }
+
+    /// Installs the service-owned coherent runtime topology exactly once.
+    pub fn set_runtime_topology(
+        &self,
+        topology: Arc<crate::infra::runtime_topology::AutomationTopologyHandle>,
+    ) -> aether_ports::PortResult<()> {
+        self.runtime_topology.set(topology).map_err(|_| {
+            aether_ports::PortError::new(
+                aether_ports::PortErrorKind::Conflict,
+                "automation runtime topology is already configured",
+            )
+        })
+    }
+
+    /// Returns the coherent production topology when composition is complete.
+    #[must_use]
+    pub fn runtime_topology(
+        &self,
+    ) -> Option<&Arc<crate::infra::runtime_topology::AutomationTopologyHandle>> {
+        self.runtime_topology.get()
     }
 
     /// Publish the current SHM reader for live instance queries.
@@ -389,11 +416,19 @@ impl InstanceManager {
         &self.routing_cache
     }
 
-    /// Refresh routing cache from database (local operation only)
+    /// Refresh routing from the authoritative SQLite topology.
     ///
-    /// SHM layout is based on channel points, not routing — no SHM rebuild needed.
-    /// io independently refreshes its own routing cache via periodic polling.
+    /// Production publishes routing together with the validated point/health
+    /// generation. The local-only fallback remains for compatibility tests
+    /// that do not compose the production runtime topology.
     pub async fn refresh_routing(&self) -> anyhow::Result<usize> {
+        if let Some(topology) = self.runtime_topology.get() {
+            topology
+                .refresh_or_revoke_commands(&self.pool)
+                .await
+                .map_err(|error| anyhow!(error.to_string()))?;
+            return Ok(topology.load().route_count());
+        }
         crate::bootstrap::refresh_routing_cache(&self.pool, &self.routing_cache).await
     }
 
