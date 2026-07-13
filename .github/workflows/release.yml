@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -64,6 +64,78 @@ jobs:
           cargo nextest run -p aether-shm-bridge -p aether-redis-bridge -p aether-postgres-history -p aether-example-minimal-gateway -p aether-example-energy-gateway
           cargo nextest run --workspace --lib --bins
 
+  publish-crates:
+    name: Publish public crates
+    runs-on: ubuntu-latest
+    needs: pre-check
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.90.0
+
+      - name: Publish in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          user_agent='AetherIot release workflow (https://github.com/EvanL1/AetherIot)'
+
+          crate_is_published() {
+            local crate=$1
+            curl --fail --silent --show-error \
+              --user-agent "$user_agent" \
+              "https://crates.io/api/v1/crates/$crate/$version" \
+              >/dev/null 2>&1
+          }
+
+          wait_for_crate() {
+            local crate=$1
+            for _ in {1..30}; do
+              if crate_is_published "$crate"; then
+                return 0
+              fi
+              sleep 10
+            done
+            echo "crate did not become visible on crates.io: $crate@$version" >&2
+            return 1
+          }
+
+          publish_crate() {
+            local crate=$1
+            if crate_is_published "$crate"; then
+              echo "$crate@$version is already published; continuing idempotently"
+            else
+              cargo publish --locked -p "$crate"
+            fi
+            wait_for_crate "$crate"
+          }
+
+          crates=(
+            aether-domain
+            aether-dataplane
+            aether-pack
+            aether-ports
+            aether-data-processing
+            aether-testkit
+            aether-shm-bridge
+            aether-store-local
+            aether-application
+            aether-edge-sdk
+            aether-http-data-processor
+            aether-http-history-query
+            aether-sqlite-history-query
+            aether-redis-bridge
+            aether-postgres-history
+          )
+          for crate in "${crates[@]}"; do
+            publish_crate "$crate"
+          done
+
   # ============================================================================
   # Job 2: Build Multi-Arch Installers (Parallel Matrix)
   # ============================================================================
@@ -87,7 +159,7 @@ jobs:
             zig_arch: x86_64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
           fetch-depth: 0
@@ -195,6 +267,14 @@ jobs:
           echo "Build artifacts:"
           ls -lh release/
 
+      - name: Package runtime manifest
+        run: |
+          set -euo pipefail
+          name="aetheriot-runtime-manifest-${{ matrix.arch }}-${{ steps.version.outputs.version }}.json"
+          cp build/installer/runtime/runtime-manifest.json "release/$name"
+          python3 -m json.tool "release/$name" >/dev/null
+          (cd release && sha256sum "$name" > "$name.sha256")
+
       - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
@@ -202,6 +282,8 @@ jobs:
           path: |
             release/${{ steps.version.outputs.artifact_name }}
             release/${{ steps.version.outputs.artifact_name }}.sha256
+            release/aetheriot-runtime-manifest-${{ matrix.arch }}-${{ steps.version.outputs.version }}.json
+            release/aetheriot-runtime-manifest-${{ matrix.arch }}-${{ steps.version.outputs.version }}.json.sha256
           retention-days: 7
           if-no-files-found: error
 
@@ -235,7 +317,7 @@ jobs:
             archive: zip
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -300,12 +382,14 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build, aether-extra]
+    needs: [build, aether-extra, publish-crates]
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -338,7 +422,28 @@ jobs:
             bash "$installer" --list | grep -Eq '(^|/)LICENSE$'
             bash "$installer" --list | grep -Eq '(^|/)NOTICE$'
           done
+          for manifest in release/aetheriot-runtime-manifest-*.json; do
+            python3 -m json.tool "$manifest" >/dev/null
+          done
           (cd release && sha256sum -c ./*.sha256)
+
+      - name: Generate signed build provenance
+        id: provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release/*.run
+            release/*.tar.gz
+            release/*.zip
+            release/aetheriot-runtime-manifest-*.json
+
+      - name: Package provenance bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="release/aetheriot-${GITHUB_REF_NAME}-provenance.sigstore.json"
+          cp "${{ steps.provenance.outputs.bundle-path }}" "$bundle"
+          (cd release && sha256sum "$(basename "$bundle")" > "$(basename "$bundle").sha256")
 
       - name: Generate Release Notes
         run: |
@@ -368,6 +473,16 @@ jobs:
           | Linux aarch64 | \`aether-linux-aarch64.tar.gz\` |
           | macOS ARM64 | \`aether-darwin-aarch64.tar.gz\` |
           | Windows x64 | \`aether-windows-x86_64.zip\` |
+
+          ### Runtime contracts and provenance
+
+          - \`aetheriot-runtime-manifest-arm64-${VERSION}.json\`
+          - \`aetheriot-runtime-manifest-amd64-${VERSION}.json\`
+          - \`aetheriot-${TAG_NAME}-provenance.sigstore.json\`
+
+          Every binary, installer, and runtime manifest has an adjacent
+          SHA-256 file. GitHub's Sigstore-backed artifact attestation can be
+          verified with \`gh attestation verify <asset> -R EvanL1/AetherIot\`.
 
           ### Quick Start
 
@@ -438,6 +553,12 @@ jobs:
             release/aether-darwin-aarch64.tar.gz.sha256
             release/aether-windows-x86_64.zip
             release/aether-windows-x86_64.zip.sha256
+            release/aetheriot-runtime-manifest-arm64-${{ steps.version.outputs.version }}.json
+            release/aetheriot-runtime-manifest-arm64-${{ steps.version.outputs.version }}.json.sha256
+            release/aetheriot-runtime-manifest-amd64-${{ steps.version.outputs.version }}.json
+            release/aetheriot-runtime-manifest-amd64-${{ steps.version.outputs.version }}.json.sha256
+            release/aetheriot-${{ github.ref_name }}-provenance.sigstore.json
+            release/aetheriot-${{ github.ref_name }}-provenance.sigstore.json.sha256
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

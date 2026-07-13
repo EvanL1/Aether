@@ -141,7 +141,7 @@ create and rename are cleaned up at the next io startup.
 ## Command notifications
 
 When automation issues a command — a rule action or an HTTP control request (see
-[Safe Operations for AI Agents](../domain/safe-operations.md) for what is
+[Safe Operations for Applications and Agents](../guides/safe-operations.md) for what is
 allowed to reach devices) — it writes the C/A slot through its `ActionWriter`
 and then sends a notification over a Unix domain socket
 (`/tmp/aether-m2c.sock`) so io reacts immediately instead of polling. In
@@ -216,4 +216,4 @@ previous Redis-tick model — roughly a 500× improvement at the median.
 - [Data Model](data-model.md) — what T/S/C/A values mean, and the NaN sentinel
 - [Data Flow](data-flow.md) — uplink/downlink paths and the latency budget
 - [Rule Engine](rule-engine.md) — the consumer of PointWatch events
-- [Safe Operations for AI Agents](../domain/safe-operations.md) — which writes reach devices
+- [Safe Operations for Applications and Agents](../guides/safe-operations.md) — which writes reach devices

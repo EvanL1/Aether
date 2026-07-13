@@ -48,8 +48,8 @@ pnpm --version
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/EvanL1/Aether.git
-cd Aether
+git clone https://github.com/EvanL1/AetherIot.git
+cd AetherIot
 
 # 2. 生成并应用 fail-safe 空站点计划（无需外部数据库）
 cargo build --release -p aether
@@ -135,34 +135,19 @@ cargo test -p aether-rtdb
 cargo test -p aether-example-minimal-gateway --test composition_contract
 ```
 
-### 步骤 6：启动前端
+### 步骤 6：连接应用客户端
 
-```bash
-# 进入前端目录
-cd apps
-
-# 安装依赖
-pnpm install
-
-# 启动开发服务器
-pnpm dev
-
-# 访问 http://localhost:8080
-```
+AetherIot 是 headless runtime，不捆绑前端。远程应用只连接
+`aether-api:6005`；可从 OpenAPI 契约生成客户端，具体见
+[使用 AI 构建应用](./guides/build-applications-with-ai.md)。能源管理操作界面由
+[AetherEMS](https://github.com/EvanL1/AetherEMS) 独立维护。
 
 ---
 
 ## 项目结构
 
 ```
-AetherEMS/
-├── apps/                    # 前端应用（Vue 3 + Element Plus + ECharts）
-│   ├── src/
-│   │   ├── views/          # 页面组件
-│   │   ├── components/     # 通用组件
-│   │   └── api/            # API 客户端
-│   └── package.json
-│
+AetherIot/
 ├── services/                # 后端服务
 │   ├── io/             # 通信服务 - 工业协议驱动、通道管理 (Rust)
 │   │   ├── src/
@@ -382,20 +367,15 @@ unset AETHER_REDIS_URL
 cargo test
 ```
 
-### Q: 前端无法连接后端
+### Q: 远程应用无法连接运行时
 
 **解决方案：**
 ```bash
-# 检查后端服务
-curl http://localhost:6001/health
-curl http://localhost:6002/health
+# 对外只检查统一入口；其他服务端口必须保持 loopback
+curl http://localhost:6005/health
 
-# 检查 CORS 配置
-# 确保后端允许 http://localhost:8080
-
-# 检查前端 API 配置
-cat apps/.env.local
-# VITE_API_BASE_URL=http://localhost:6001
+# 检查运行时与认证配置
+aether --json doctor
 ```
 
 ---
@@ -411,5 +391,5 @@ cat apps/.env.local
 
 ## 联系支持
 
-- **Issues**: https://github.com/EvanL1/Aether/issues
-- **文档**: https://github.com/EvanL1/Aether/tree/main/docs
+- **Issues**: https://github.com/EvanL1/AetherIot/issues
+- **文档**: https://docs.aetheriot.workers.dev

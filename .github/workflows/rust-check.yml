@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Find ignored tests
         run: |
@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -106,7 +106,7 @@ jobs:
     needs: quality-check
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -144,7 +144,7 @@ jobs:
     needs: quality-check
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -185,7 +185,7 @@ jobs:
     needs: unit-tests
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -277,7 +277,7 @@ jobs:
     needs: [unit-tests, config-validation]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 
@@ -325,6 +325,13 @@ jobs:
           docker compose exec -T aether-redis redis-cli FLUSHDB
           cargo nextest run -p aether-redis-bridge
 
+      - name: Run Legacy Redis Pool Contracts
+        env:
+          REDIS_URL: redis://localhost:6379
+        run: |
+          docker compose exec -T aether-redis redis-cli FLUSHDB
+          cargo test -p aether-infra -- --ignored --test-threads=1
+
       # Cleanup Docker resources
       - name: Stop Redis
         if: always()
@@ -341,7 +348,7 @@ jobs:
     needs: [unit-tests, config-validation]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: true
 

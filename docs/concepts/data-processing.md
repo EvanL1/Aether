@@ -371,4 +371,4 @@ Aether Data Processing is not:
 - [Data Flow](data-flow.md) — authoritative uplink and control paths
 - [Shared Memory](shared-memory.md) — live-state authority and writer ownership
 - [Rule Engine](rule-engine.md) — deterministic automation behavior
-- [Safe Operations for AI Agents](../domain/safe-operations.md) — permission, confirmation, audit, and control policy
+- [Safe Operations for Applications and Agents](../guides/safe-operations.md) — permission, confirmation, audit, and control policy

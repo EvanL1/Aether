@@ -1,11 +1,13 @@
 ---
-name: aether-ems-query
-description: Use this skill when the user asks about AetherEMS live data: channels, devices, points, real-time values, historical sensor data, alarms, rules, models, instances, routing, SHM health, service health, or system status. Use aether CLI commands to answer — do NOT inspect source code, local database files, or config YAMLs to answer questions about current platform state.
+name: aether-iot-query
+description: Use this skill when the user asks about a live AetherIot runtime: channels, points, real-time values, history, alarms, rules, models, instances, routing, SHM health, service health, or system status. Use aether CLI commands to answer — do NOT inspect source code, local database files, or config YAMLs to answer questions about current platform state.
 ---
 
-# AetherEMS Query Skill
+# AetherIot Runtime Query Skill
 
-Use `aether` as the primary interface for all live AetherEMS platform data.
+Use `aether` as the primary interface for live AetherIot runtime data. Energy
+models, mappings, rules, commissioning examples, and operator-console guidance
+belong to the downstream AetherEMS repository.
 
 ## Core Rules
 
@@ -28,7 +30,7 @@ aether channels --help
 | Flag | Purpose |
 |------|---------|
 | `--json` | Machine-readable output (suppresses color/banner) |
-| `--host <ip>` | Remote target (e.g. `--host 192.168.30.21`) |
+| `--host <ip>` | Read-only direct-service diagnostics (e.g. `--host 192.0.2.10`) |
 | `--verbose` | Debug-level logging |
 
 ## Authentication
@@ -42,14 +44,16 @@ authority.
 
 ```bash
 # Option A — SSH (aether lives on the remote machine)
-ssh root@192.168.30.62 'aether --json alarms list'
+ssh operator@192.0.2.10 'aether --json alarms list'
 
 # Option B — local aether binary + --host flag
-#   (requires service ports 6001/6002/6004/6006 to be reachable from localhost)
-aether --host 192.168.30.62 --json alarms list
+#   read-only diagnostics only; requires explicitly protected service ingress
+aether --host 192.0.2.10 --json alarms list
 ```
 
-Prefer Option A when aether is already installed on the target machine and you are not sure which ports are exposed.
+Prefer Option A. Browser applications and operator consoles must use the
+authenticated `aether-api` application gateway rather than expose internal
+service ports.
 
 ## Command Map
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Aether CLI installer — auto-detects platform, downloads binary, adds to PATH
-# Usage: curl -fsSL https://raw.githubusercontent.com/EvanL1/Aether/main/tools/aether/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/EvanL1/AetherIot/main/tools/aether/install.sh | bash
 set -euo pipefail
 
-REPO="EvanL1/Aether"
+REPO="EvanL1/AetherIot"
 INSTALL_DIR="${AETHER_INSTALL_DIR:-$HOME/.local/bin}"
 INSTALL_TMPDIR=""
 

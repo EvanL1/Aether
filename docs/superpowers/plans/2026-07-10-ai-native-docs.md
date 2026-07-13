@@ -1,5 +1,9 @@
 # AI-Native Docs Corpus Implementation Plan
 
+> **Historical migration plan — do not execute.** Its EMS positioning,
+> embedded energy knowledge, Redis paths, and bundled frontend assumptions have
+> been superseded by the AetherIot/AetherEMS repository boundary and ADR-0012.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build an 18-page English, Neon-style docs corpus (energy-storage know-how + architecture + guides + reference), index it in a root `llms.txt`, embed a curated 11-page subset into the `aether` binary as MCP resources, and reposition the README as an AI-native EMS.

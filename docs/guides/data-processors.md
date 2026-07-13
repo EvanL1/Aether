@@ -432,9 +432,9 @@ must commission a quality-bearing source adapter before production.
 
 - [Data Processing Contracts](../reference/data-processing-contracts.md) — v1 wire contracts and validation rules
 - [HTTP Data Processor](../../extensions/http-data-processor/README.md) — bounded local/remote adapter and composition API
-- [Power Forecasting](../domain/power-forecasting.md) — the first AetherEMS task and processor migration
+- [AetherEMS Power Forecasting](https://github.com/EvanL1/AetherEMS/blob/main/packs/energy/knowledge/power-forecasting.md) — the first downstream task and processor
 - [Load-Forecasting Processor](../../integrations/load-forecasting/README.md) — tested `/v1/process` adapter for the existing Edge-Platform
 - [JSON Schemas](../../contracts/data-processing/README.md) — strict v1 transport validation
 - [Data Flow](../concepts/data-flow.md) — authoritative live and historical paths
 - [System Architecture](../concepts/architecture.md) — core layers and service boundaries
-- [Safe Operations for AI Agents](../domain/safe-operations.md) — why derived data does not bypass control policy
+- [Safe Operations for Applications and Agents](safe-operations.md) — why derived data does not bypass control policy

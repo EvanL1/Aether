@@ -1,11 +1,11 @@
-# Aether Agent Instructions
+# AetherIot Agent Instructions
 
 This file is the canonical instruction source for coding agents working in this
 repository. Tool-specific files may add usage notes, but must not contradict it.
 
 ## Product Direction
 
-Aether is an AI-native, industry-neutral IoT edge kernel and SDK. Energy
+AetherIot is an AI-native, industry-neutral IoT edge kernel and SDK. Energy
 management is an optional domain pack, not a dependency of the core runtime.
 The default distribution must run on one Linux edge host without Redis,
 PostgreSQL, or any other external service.

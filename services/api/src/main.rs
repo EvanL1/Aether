@@ -1,12 +1,13 @@
 //! `aether-api` — management API and WebSocket service.
 //!
-//! Unified entry for the AetherEMS front-end:
+//! Unified remote application entry for AetherIot clients:
 //! - JWT auth (users, roles)
 //! - WebSocket real-time data push with subscriptions
 //! - POST /broadcast – push any JSON to all WebSocket clients
 //! - GET /api/v1/homepage – calculated points CRUD
 //! - GET /api/v1/network – read-only systemd-networkd view; remote writes disabled
 //! - GET /api/v1/config – admin-only config checks/export; remote mutation is disabled
+//! - /api/v1/{io,automation,history,uplink,alarm}/* – authenticated application gateway
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -41,6 +42,7 @@ mod routes_config;
 mod routes_data_processing;
 mod routes_homepage;
 mod routes_network;
+mod service_gateway;
 mod state;
 #[cfg(test)]
 mod test_support;
@@ -388,7 +390,8 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/broadcast/status", get(routes_broadcast::broadcast_status))
         .nest("/homepage", homepage_routes)
         .nest("/network", network_routes)
-        .nest("/config", config_routes);
+        .nest("/config", config_routes)
+        .merge(service_gateway::router());
     let protected_v1 = match commissioned_data_processing_router(&state) {
         Some(routes) => protected_v1.nest("/data-processing", routes),
         None => protected_v1,
@@ -527,6 +530,11 @@ async fn main() -> anyhow::Result<()> {
 
     // ── App State ─────────────────────────────────────────────────────────────
     let ws_hub = WsHub::new(live_values.clone(), db_pool.clone());
+    let service_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(
+            cfg.service_request_timeout_secs,
+        ))
+        .build()?;
 
     let state = Arc::new(AppState {
         db: db_pool,
@@ -534,6 +542,7 @@ async fn main() -> anyhow::Result<()> {
         ws_hub: Arc::clone(&ws_hub),
         data_processing,
         refresh_tokens: DashMap::new(),
+        service_client,
     });
 
     // ── Background tasks ──────────────────────────────────────────────────────
@@ -684,6 +693,52 @@ mod bootstrap_admin_tests {
                 .expect("query admin after skipped bootstrap")
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod service_gateway_route_tests {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    use crate::test_support::{app_state, authorization_headers};
+
+    use super::build_router;
+
+    #[tokio::test]
+    async fn internal_application_gateway_is_mounted_only_behind_jwt_authentication() {
+        let state = app_state().await;
+        let app = build_router(state);
+
+        let unauthenticated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/io/health")
+                    .body(Body::empty())
+                    .expect("valid unauthenticated request"),
+            )
+            .await
+            .expect("gateway response");
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+        let mut authenticated_request = Request::builder()
+            .uri("/api/v1/io/health")
+            .body(Body::empty())
+            .expect("valid authenticated request");
+        *authenticated_request.headers_mut() = authorization_headers("Engineer");
+        let authenticated = app
+            .oneshot(authenticated_request)
+            .await
+            .expect("gateway response");
+        assert_eq!(authenticated.status(), StatusCode::BAD_GATEWAY);
+        let body = to_bytes(authenticated.into_body(), 16 * 1024)
+            .await
+            .expect("read gateway response");
+        assert!(String::from_utf8_lossy(&body).contains("UPSTREAM_UNAVAILABLE"));
     }
 }
 

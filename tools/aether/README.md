@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-Unified management tool for the [Aether](https://github.com/EvanL1/Aether)
+Unified management tool for the [AetherIot](https://github.com/EvanL1/AetherIot)
 AI-native, industry-neutral IoT edge kernel. Energy management is an optional
 domain pack rather than a CLI or runtime prerequisite.
 
@@ -11,7 +11,7 @@ domain pack rather than a CLI or runtime prerequisite.
 ### One-line install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/EvanL1/Aether/main/tools/aether/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/EvanL1/AetherIot/main/tools/aether/install.sh | bash
 ```
 
 Auto-detects a published platform artifact and installs to `~/.local/bin`.
@@ -54,10 +54,10 @@ aether models instances list
 aether rules list
 
 # Remote read-only inspection
-aether --host 192.168.30.21 channels list
+aether --host 192.0.2.10 channels list
 
 # Interactive dashboard
-aether --host 192.168.30.21 top
+aether --host 192.0.2.10 top
 ```
 
 `aether setup` can prepare a safe local configuration/database workspace with
@@ -190,7 +190,7 @@ URLs on the default ports, so use it only for remote read-only inspection.
 
 ```bash
 aether top                          # Local
-aether --host 192.168.30.21 top    # Remote
+aether --host 192.0.2.10 top    # Remote
 ```
 
 | Key | Action |

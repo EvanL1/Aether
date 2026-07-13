@@ -123,8 +123,8 @@ claude mcp add aether -- aether mcp
 ```
 
 For a session that needs to issue writes (device control, rule changes) —
-read [Safe Operations for AI Agents](https://github.com/EvanL1/AetherIot/blob/main/docs/domain/safe-operations.md)
-in the main repo before doing this against real hardware:
+read [Safe Operations for Applications and Agents](/guides/safe-operations/)
+before doing this against real hardware:
 
 ```bash
 claude mcp add aether -- aether mcp --allow-write

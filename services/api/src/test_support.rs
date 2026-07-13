@@ -79,6 +79,7 @@ pub(crate) async fn app_state_with_public_registration(
         ws_hub,
         data_processing: None,
         refresh_tokens: DashMap::new(),
+        service_client: reqwest::Client::new(),
     })
 }
 
