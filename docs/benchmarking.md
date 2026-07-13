@@ -1,5 +1,9 @@
 # AetherEMS 产品竞品 Benchmarking
 
+> **历史产品研究。** 本文保留拆仓前的 EMS 市场分析，不描述 AetherIot
+> 当前行业中立 kernel 能力，也不作为架构或发布事实源。能源产品策略由
+> [AetherEMS](https://github.com/EvanL1/AetherEMS) 继续维护。
+
 > **分析日期**：2026-02-10
 > **分析视角**：产品能力 / 客户价值 / 市场定位
 > **对标竞品**：Ageto ARC (Generac) / Tesla Autobidder / FlexGen HybridOS / Powin StackOS / PXiSE / EnergyHub / OpenEMS

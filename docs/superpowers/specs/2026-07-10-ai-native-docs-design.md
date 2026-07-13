@@ -1,5 +1,9 @@
 # AI-Native 文档体系设计文档
 
+> **历史迁移资料，不是当前产品定位。** 本文记录 AetherEMS 尚未拆仓时的
+> 文档设计。AetherIot 现为行业中立 headless kernel；能源知识与 Console
+> 归 AetherEMS，当前文档入口以 `README.md` 和 ADR-0012 为准。
+
 - **日期**: 2026-07-10
 - **状态**: 已定稿，待实施
 - **前置**: `../../reference/mcp-tools.md`（MCP server 已落地；工具清单以生成的正式参考为准）

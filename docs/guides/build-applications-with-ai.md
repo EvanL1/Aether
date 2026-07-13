@@ -71,13 +71,13 @@ service port, scrape SQLite, attach to SHM, or invent an endpoint.
 
 ## Keep one remote boundary
 
-Only `aether-api` is intended for remote application traffic. The IO, automation, history, uplink,
-and alarm process APIs remain on loopback and may include compatibility surfaces that are unsafe to
-publish.
+Only `aether-api` is intended for remote application traffic. It publishes fixed authenticated
+namespaces under `/api/v1/io`, `/api/v1/automation`, `/api/v1/history`, `/api/v1/uplink`, and
+`/api/v1/alarm`; their owning process APIs remain on loopback.
 
 A generated remote client must therefore:
 
-- call only capabilities published through authenticated `aether-api`;
+- call those gateway-prefixed capabilities only through authenticated `aether-api` on port 6005;
 - use the running gateway's OpenAPI contract to generate types and requests;
 - use its authenticated WebSocket contract for live updates when available;
 - report an unavailable use case instead of proxying an internal port;

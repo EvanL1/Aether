@@ -6,6 +6,8 @@ Accepted and implemented for external device actions on 2026-07-11. The
 nonexistent instance-measurement compatibility surface and the rule engine's
 direct action-dispatch path were removed on 2026-07-12. Physical action-route
 mutations joined the same application boundary on 2026-07-12.
+The fixed authenticated remote service namespaces were added on 2026-07-14 so
+downstream applications no longer connect to process ports directly.
 
 ## Context
 
@@ -94,6 +96,15 @@ aether-automation, and aether-io.
     command map. Publication failure clears the map so a stale physical target
     cannot remain authoritative. `aether sync` must fail closed for action
     entries until a governed batch command exists.
+14. Remote applications connect only to `aether-api`. The gateway maps the
+    fixed `/api/v1/io`, `/api/v1/automation`, `/api/v1/history`,
+    `/api/v1/uplink`, and `/api/v1/alarm` namespaces to startup-validated
+    loopback origins. Callers cannot supply an upstream host. The gateway
+    forwards the signed Bearer token, explicit confirmation, idempotency, and
+    conditional-request headers, but never trusts or forwards actor identity
+    headers. Each owning service continues to enforce its application policy;
+    the gateway is a transport consolidation boundary, not an authorization
+    bypass.
 
 ## Consequences
 
@@ -123,6 +134,11 @@ aether-automation, and aether-io.
 - Once an action-routing mutation commits, publication failure is returned as
   a non-retryable accepted receipt with `runtime.status=commands_revoked`, not
   as a transport error that could cause the durable mutation to be repeated.
+- Browser and remote SDK clients have one origin and one externally exposed
+  port; process-local ports remain isolated and independently enforce governed
+  commands.
+- Gateway target selection is closed to five configured loopback services and
+  upstream failures do not disclose their addresses.
 
 ### Negative
 
@@ -152,5 +168,6 @@ cargo test -p aether --test removed_instance_measurement_surface
 cargo test -p aether-application --test action_routing_application
 cargo test -p aether-automation --test test_action_routing_boundary
 cargo test -p aether mcp::tests::routing_action
+cargo test -p aether-api service_gateway --no-default-features
 ./scripts/check-architecture.sh
 ```

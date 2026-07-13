@@ -660,7 +660,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Requires Redis server
+    #[ignore = "executed by the Redis Extension Contract job"]
     async fn test_connection_pool() {
         let config = RedisPoolConfig {
             url: "redis://localhost:6379".to_string(),
@@ -682,9 +682,15 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis server
+    #[ignore = "executed by the Redis Extension Contract job"]
     async fn test_concurrent_operations() {
-        let client = RedisClient::new("redis://localhost:6379").await.unwrap();
+        let client = RedisClient::with_config(RedisPoolConfig {
+            url: "redis://localhost:6379".to_string(),
+            max_connections: 20,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
 
         // Spawn multiple concurrent operations
         let mut handles = vec![];

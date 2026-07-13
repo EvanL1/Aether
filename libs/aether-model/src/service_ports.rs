@@ -1,6 +1,6 @@
 //! Service Port Constants
 //!
-//! Single source of truth for all AetherEMS service default ports.
+//! Single source of truth for legacy AetherIot service default ports.
 //! These are used as fallback defaults when not overridden by configuration.
 
 /// Default port for aether-io.
@@ -21,7 +21,7 @@ pub const ALARM_PORT: u16 = 6007;
 /// Default port for aether-uplink.
 pub const UPLINK_PORT: u16 = 6006;
 
-/// Default port for aether-apps (frontend)
+/// Reserved compatibility port for downstream HTTP applications.
 pub const APPS_PORT: u16 = 8080;
 
 /// Default Redis port

@@ -8,12 +8,6 @@
 edgelink
 benchmarks
 
-# apps/ uses pnpm (see package.json's packageManager field); the lockfile
-# must be committed for `pnpm install --frozen-lockfile` (apps/Dockerfile,
-# scripts/build-installer.sh) to work. Un-ignores it against any global
-# gitignore that blanket-excludes pnpm-lock.yaml across every repo.
-!/apps/pnpm-lock.yaml
-
 # IDE
 .idea/
 .vscode/
@@ -88,14 +82,6 @@ test-logs/
 
 # Dependencies
 **/node_modules/
-
-# Frontend build outputs
-apps/*/dist/
-apps/*/build/
-apps/*/.next/
-apps/*/.nuxt/
-apps/*/.output/
-apps/*/.cache/
 
 # Docker
 .docker/

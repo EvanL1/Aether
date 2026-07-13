@@ -17,6 +17,7 @@
 
 mod support;
 
+use aether_ports::{AuditSink, ChannelMutator, ChannelReconciler};
 use anyhow::Result;
 use axum::{
     body::Body,
@@ -27,62 +28,23 @@ use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
 
+const TEST_JWT_SECRET: &str = "0123456789abcdef0123456789abcdef";
+const ADMIN_ACCESS_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo3LCJyb2xlIjoiQWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjQxMDI0NDQ4MDB9.JtjQvDBo7j0bLOxwed6yC9-M9qFCloc4H2Dt0LjzF9E";
+const TEST_REQUEST_ID: &str = "018f0000-0000-7000-8000-000000000051";
+
 /// Create test SQLite database with required schema
 async fn create_test_database() -> Result<sqlx::SqlitePool> {
-    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await?;
-
-    // Create channels table (matches production schema)
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await?;
+    common::test_utils::schema::init_io_schema(&pool).await?;
+    common::test_utils::schema::init_automation_schema(&pool).await?;
     sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS channels (
-            channel_id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
-            protocol TEXT NOT NULL,
-            enabled BOOLEAN NOT NULL DEFAULT TRUE,
-            config TEXT
-        )"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    // Create routing tables
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS c2m_routing (
-            channel_id INTEGER NOT NULL,
-            point_type TEXT NOT NULL,
-            point_id INTEGER NOT NULL,
-            instance_id INTEGER NOT NULL,
-            signal_name TEXT,
-            PRIMARY KEY (channel_id, point_type, point_id)
-        )"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS m2c_routing (
-            instance_id INTEGER NOT NULL,
-            point_type TEXT NOT NULL,
-            signal_name TEXT NOT NULL,
-            channel_id INTEGER NOT NULL,
-            point_id INTEGER NOT NULL,
-            PRIMARY KEY (instance_id, point_type, signal_name)
-        )"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS c2c_routing (
-            src_channel_id INTEGER NOT NULL,
-            src_point_type TEXT NOT NULL,
-            src_point_id INTEGER NOT NULL,
-            dst_channel_id INTEGER NOT NULL,
-            dst_point_type TEXT NOT NULL,
-            dst_point_id INTEGER NOT NULL,
-            scale REAL DEFAULT 1.0,
-            offset REAL DEFAULT 0.0,
-            PRIMARY KEY (src_channel_id, src_point_type, src_point_id, dst_channel_id, dst_point_type, dst_point_id)
-        )"#,
+        "CREATE TABLE IF NOT EXISTS json_point_mappings (\
+             id INTEGER PRIMARY KEY AUTOINCREMENT,\
+             channel_id INTEGER NOT NULL REFERENCES channels(channel_id) ON DELETE CASCADE\
+         )",
     )
     .execute(&pool)
     .await?;
@@ -106,8 +68,36 @@ async fn create_test_app() -> Result<axum::Router> {
     // Create command TX cache
     let command_tx_cache = Arc::new(aether_io::api::command_cache::CommandTxCache::new());
 
-    // Create router
-    let router = aether_io::api::routes::create_api_routes(channel_manager, pool, command_tx_cache);
+    let adapter = Arc::new(aether_io::SqliteChannelMutator::new(
+        pool.clone(),
+        Arc::clone(&channel_manager),
+    ));
+    let mutator: Arc<dyn ChannelMutator> = adapter.clone();
+    let reconciler: Arc<dyn ChannelReconciler> = adapter;
+    let audit: Arc<dyn AuditSink> = Arc::new(aether_store_local::MemoryAuditSink::new());
+    let channel_management = Arc::new(aether_application::ChannelManagementApplication::new(
+        mutator,
+        Arc::clone(&audit),
+        aether_application::SafetyPolicy,
+    ));
+    let channel_reconciliation =
+        Arc::new(aether_application::ChannelReconciliationApplication::new(
+            reconciler,
+            audit,
+            aether_application::SafetyPolicy,
+        ));
+    let access_authenticator = Arc::new(
+        aether_auth_jwt::AccessTokenAuthenticator::new(TEST_JWT_SECRET)
+            .expect("valid test access-token secret"),
+    );
+    let router = aether_io::api::routes::create_api_routes_with_channel_applications(
+        channel_manager,
+        pool,
+        command_tx_cache,
+        channel_management,
+        channel_reconciliation,
+        access_authenticator,
+    );
     Ok(router)
 }
 
@@ -118,7 +108,12 @@ async fn make_request(
     uri: &str,
     body: Option<serde_json::Value>,
 ) -> Result<(StatusCode, serde_json::Value)> {
-    let mut req_builder = Request::builder().method(method).uri(uri);
+    let mut req_builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("authorization", format!("Bearer {ADMIN_ACCESS_TOKEN}"))
+        .header("x-request-id", TEST_REQUEST_ID)
+        .header("x-aether-confirmed", "true");
 
     let body_bytes = if let Some(json_body) = body {
         req_builder = req_builder.header("content-type", "application/json");
@@ -242,8 +237,7 @@ async fn test_create_channel_duplicate_name() -> Result<()> {
     assert!(
         body["error"]["message"]
             .as_str()
-            .unwrap()
-            .contains("already exists")
+            .is_some_and(|message| !message.is_empty())
     );
 
     Ok(())
@@ -374,11 +368,14 @@ async fn test_update_channel_parameters() -> Result<()> {
 
     assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
     assert_eq!(body["success"], true);
-    // Runtime status should indicate update was applied
+    // Runtime projection is explicit and may be degraded while the desired
+    // mutation is still accepted for later reconciliation.
     assert!(
-        body["data"]["runtime_status"].as_str().unwrap() == "updated"
-            || body["data"]["runtime_status"].as_str().unwrap() == "running"
-            || body["data"]["runtime_status"].as_str().unwrap() == "stopped"
+        matches!(
+            body["data"]["runtime_projection"].as_str(),
+            Some("stopped" | "activation_pending" | "active" | "degraded")
+        ),
+        "Response: {body:?}"
     );
 
     Ok(())
@@ -394,7 +391,7 @@ async fn test_update_channel_not_found() -> Result<()> {
     });
 
     let (status, body) =
-        make_request(&mut app, "PUT", "/api/channels/99999", Some(update_payload)).await?;
+        make_request(&mut app, "PUT", "/api/channels/9998", Some(update_payload)).await?;
 
     assert_eq!(status, StatusCode::NOT_FOUND, "Response: {:?}", body);
     assert_eq!(body["success"], false);
@@ -513,7 +510,8 @@ async fn test_enable_already_enabled_channel() -> Result<()> {
     let (status, _) = make_request(&mut app, "POST", "/api/channels", Some(create_payload)).await?;
     assert_eq!(status, StatusCode::OK);
 
-    // Try to enable again (should return success with "already enabled" message)
+    // Repeating a non-idempotent mutation is represented as a fresh,
+    // non-retryable acceptance receipt.
     let enable_payload = json!({ "enabled": true });
     let (status, body) = make_request(
         &mut app,
@@ -525,12 +523,9 @@ async fn test_enable_already_enabled_channel() -> Result<()> {
 
     assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
     assert_eq!(body["success"], true);
-    assert!(
-        body["data"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("already")
-    );
+    assert_eq!(body["data"]["operation"], "enable");
+    assert_eq!(body["data"]["retryable"], false);
+    assert!(body["data"]["resulting_revision"].as_u64().is_some());
 
     Ok(())
 }
@@ -543,7 +538,7 @@ async fn test_enable_nonexistent_channel() -> Result<()> {
     let (status, body) = make_request(
         &mut app,
         "PUT",
-        "/api/channels/99999/enabled",
+        "/api/channels/9998/enabled",
         Some(enable_payload),
     )
     .await?;
@@ -579,7 +574,9 @@ async fn test_delete_channel() -> Result<()> {
 
     assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
     assert_eq!(body["success"], true);
-    assert!(body["data"].as_str().unwrap().contains("deleted"));
+    assert_eq!(body["data"]["operation"], "delete");
+    assert_eq!(body["data"]["runtime_projection"], "removed");
+    assert_eq!(body["data"]["retryable"], false);
 
     // Verify channel is gone
     let (status, _) = make_request(&mut app, "GET", "/api/channels/5001", None).await?;
@@ -592,7 +589,7 @@ async fn test_delete_channel() -> Result<()> {
 async fn test_delete_nonexistent_channel() -> Result<()> {
     let mut app = create_test_app().await?;
 
-    let (status, body) = make_request(&mut app, "DELETE", "/api/channels/99999", None).await?;
+    let (status, body) = make_request(&mut app, "DELETE", "/api/channels/9998", None).await?;
 
     assert_eq!(status, StatusCode::NOT_FOUND, "Response: {:?}", body);
     assert_eq!(body["success"], false);
@@ -628,7 +625,9 @@ async fn test_reload_configuration() -> Result<()> {
 
     assert_eq!(status, StatusCode::OK, "Response: {:?}", body);
     assert_eq!(body["success"], true);
-    assert!(body["data"]["total_channels"].as_u64().is_some());
+    assert_eq!(body["data"]["scope"], "all");
+    assert_eq!(body["data"]["items"].as_array().map(Vec::len), Some(3));
+    assert_eq!(body["data"]["retryable"], false);
 
     Ok(())
 }

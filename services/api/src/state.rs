@@ -18,4 +18,7 @@ pub struct AppState {
     pub data_processing: Option<Arc<DataProcessingApplication>>,
     /// In-memory refresh token store: token_id -> RefreshTokenInfo
     pub refresh_tokens: DashMap<String, RefreshTokenInfo>,
+    /// Shared connection pool for the fixed internal application-service
+    /// gateway. Upstream hosts come only from trusted runtime configuration.
+    pub service_client: reqwest::Client,
 }

@@ -67,7 +67,7 @@ members = [
 [workspace.package]
 version = "0.5.0"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/EvanL1/Aether"
+repository = "https://github.com/EvanL1/AetherIot"
 
 # Clippy lints configuration
 # Run with: cargo clippy --workspace -- -W clippy::unwrap_used -W clippy::expect_used
@@ -134,7 +134,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # HTTP clients
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart", "stream"] }
 
 # Configuration
 figment = { version = "0.10", features = ["yaml", "toml", "json", "env"] }

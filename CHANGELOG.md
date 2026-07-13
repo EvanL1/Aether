@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-07-10 — AI-native SHM Edge Kernel
+## [0.5.0] - 2026-07-14 — AI-native SHM Edge Kernel
 
 This release turns Aether from an energy-shaped application repository into an
 industry-neutral IoT edge kernel and SDK. The production runtime keeps six
@@ -34,6 +34,11 @@ authoritative live-state plane.
   Kernel target/runtime digest binding, checksummed payload inventory,
   versioned publication below the site `packs` directory, and atomic
   `global.yaml` activation with rollback before configuration replacement.
+- One authenticated remote application gateway on `aether-api:6005`, with
+  fixed namespaces for IO, automation, history, uplink, and alarm and
+  loopback-only upstream validation.
+- Versioned crates.io packages plus checksummed runtime/CLI assets and signed
+  GitHub build-provenance attestations in the release pipeline.
 
 ### Changed
 
@@ -52,6 +57,9 @@ authoritative live-state plane.
 - Energy mappings, rules, evaluations, and Data Processing tasks now live in
   closed, versioned Pack indexes. The generic CLI no longer rewrites Energy
   product aliases or resolves Energy property templates during schema upgrade.
+- AetherIot is headless: domain UIs and the Energy Pack are maintained by the
+  independent AetherEMS distribution and consume only the remote application
+  gateway.
 
 ### Fixed
 
@@ -64,6 +72,8 @@ authoritative live-state plane.
 - Kept accepted non-idempotent commands non-retryable when only their terminal
   audit append fails; responses retain correlation IDs and report the audit as
   incomplete instead of returning a misleading retryable error.
+- Removed stale `EvanL1/Aether` install and documentation URLs and made the
+  two legacy Redis pool contracts run explicitly in extension CI.
 
 ### Breaking
 

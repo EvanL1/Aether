@@ -1,5 +1,9 @@
 # 裸机 Linux 安装与启动（无 Docker）设计文档
 
+> **历史迁移资料，不是当前发行拓扑。** 本文描述的 Redis、nginx 和 Web UI
+> 捆绑方案已被否决；AetherIot 默认发行不依赖外部服务或前端，当前安装契约
+> 以 ADR-0006、ADR-0007 和 `docs/guides/deployment.md` 为准。
+
 - **日期**: 2026-07-10
 - **状态**: 已定稿，待实施
 - **关联**: 文档体系 spec（`2026-07-10-ai-native-docs-design.md`）——本功能落地后须更新 `docs/guides/deployment.md`

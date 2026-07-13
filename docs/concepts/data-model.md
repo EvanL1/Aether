@@ -197,4 +197,4 @@ not a failure flag.
 - [Shared Memory](shared-memory.md) — the SHM plane in depth: slots, seqlock, writer ownership
 - [Data Flow](data-flow.md) — the uplink and downlink paths end to end
 - [Product Models](../domain/product-models.md) — the product library and its domain meaning
-- [Safe Operations](../domain/safe-operations.md) — why control writes are gated and how failures propagate
+- [Safe Operations](../guides/safe-operations.md) — why control writes are gated and how failures propagate

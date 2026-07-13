@@ -20,6 +20,12 @@ pub struct GatewayConfig {
     pub data_fetch_interval_secs: u64,
     pub data_processing_enabled: bool,
     pub data_processing_config_path: String,
+    pub io_service_url: String,
+    pub automation_service_url: String,
+    pub history_service_url: String,
+    pub uplink_service_url: String,
+    pub alarm_service_url: String,
+    pub service_request_timeout_secs: u64,
 }
 
 impl Default for GatewayConfig {
@@ -84,6 +90,20 @@ impl Default for GatewayConfig {
                 .is_some_and(|value| explicit_opt_in(&value)),
             data_processing_config_path: env::var("AETHER_DATA_PROCESSING_CONFIG")
                 .unwrap_or_else(|_| "/app/data/config/data-processing/runtime.yaml".to_string()),
+            io_service_url: env::var("AETHER_IO_SERVICE_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:6001".to_string()),
+            automation_service_url: env::var("AETHER_AUTOMATION_SERVICE_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:6002".to_string()),
+            history_service_url: env::var("AETHER_HISTORY_SERVICE_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:6004".to_string()),
+            uplink_service_url: env::var("AETHER_UPLINK_SERVICE_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:6006".to_string()),
+            alarm_service_url: env::var("AETHER_ALARM_SERVICE_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:6007".to_string()),
+            service_request_timeout_secs: env::var("AETHER_SERVICE_REQUEST_TIMEOUT_SECS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(60),
         }
     }
 }
@@ -102,11 +122,54 @@ impl GatewayConfig {
             .map_err(|_| anyhow::anyhow!("JWT_SECRET_KEY is required"))?;
         validate_jwt_secret(&jwt_secret).map_err(anyhow::Error::msg)?;
 
-        Ok(Self {
+        let config = Self {
             jwt_secret,
             ..Self::default()
-        })
+        };
+        for (name, value) in [
+            ("AETHER_IO_SERVICE_URL", config.io_service_url.as_str()),
+            (
+                "AETHER_AUTOMATION_SERVICE_URL",
+                config.automation_service_url.as_str(),
+            ),
+            (
+                "AETHER_HISTORY_SERVICE_URL",
+                config.history_service_url.as_str(),
+            ),
+            (
+                "AETHER_UPLINK_SERVICE_URL",
+                config.uplink_service_url.as_str(),
+            ),
+            (
+                "AETHER_ALARM_SERVICE_URL",
+                config.alarm_service_url.as_str(),
+            ),
+        ] {
+            validate_internal_service_url(value)
+                .map_err(|message| anyhow::anyhow!("{name}: {message}"))?;
+        }
+        Ok(config)
     }
+}
+
+fn validate_internal_service_url(value: &str) -> Result<(), &'static str> {
+    let url = reqwest::Url::parse(value).map_err(|_| "must be a valid URL")?;
+    let loopback_host = matches!(
+        url.host_str(),
+        Some("127.0.0.1" | "localhost" | "::1" | "[::1]")
+    );
+    if url.scheme() != "http"
+        || !loopback_host
+        || url.port().is_none()
+        || url.username() != ""
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("must be an origin-only HTTP URL on an explicit loopback port");
+    }
+    Ok(())
 }
 
 fn validate_jwt_secret(secret: &str) -> Result<(), &'static str> {
@@ -124,7 +187,7 @@ fn validate_jwt_secret(secret: &str) -> Result<(), &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{explicit_opt_in, validate_jwt_secret};
+    use super::{explicit_opt_in, validate_internal_service_url, validate_jwt_secret};
 
     #[test]
     fn jwt_secret_must_be_at_least_256_bits() {
@@ -140,6 +203,30 @@ mod tests {
         }
         for disabled in ["", "0", "false", "no", "invalid"] {
             assert!(!explicit_opt_in(disabled));
+        }
+    }
+
+    #[test]
+    fn internal_service_urls_are_loopback_origins_only() {
+        for allowed in [
+            "http://127.0.0.1:6001",
+            "http://localhost:6002",
+            "http://[::1]:6004",
+        ] {
+            assert!(validate_internal_service_url(allowed).is_ok(), "{allowed}");
+        }
+        for rejected in [
+            "https://127.0.0.1:6001",
+            "http://192.168.30.62:6001",
+            "http://attacker.invalid:6001",
+            "http://127.0.0.1:6001/api",
+            "http://user:password@127.0.0.1:6001",
+            "http://127.0.0.1",
+        ] {
+            assert!(
+                validate_internal_service_url(rejected).is_err(),
+                "{rejected}"
+            );
         }
     }
 }

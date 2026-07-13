@@ -158,7 +158,7 @@ A successful device-command response means the local command plane accepted
 the command; it does not prove that the physical device executed it. A routing
 response means the physical target was persisted and published; it does not
 execute a device command. **Before
-enabling writes, read [Safe Operations for AI Agents](../domain/safe-operations.md).**
+enabling writes, read [Safe Operations for Applications and Agents](safe-operations.md).**
 If a command response reports `audit.status="incomplete"`, the command was
 already accepted: retain its `request_id`/`command_id` and do not retry it.
 Channel mutation success can also report a degraded runtime projection. Retain
@@ -193,7 +193,7 @@ on the model's prior knowledge:
 
 ## Related pages
 
-- [Safe Operations for AI Agents](../domain/safe-operations.md) — read this before `--allow-write`
+- [Safe Operations for Applications and Agents](safe-operations.md) — read this before `--allow-write`
 - [System Architecture](../concepts/architecture.md) — the services behind the tools
 - [MCP Tools Reference](../reference/mcp-tools.md) — every tool with its parameters
 - [Getting Started](getting-started.md) — build, initialize, and start the stack the tools talk to

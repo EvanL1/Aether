@@ -30,107 +30,14 @@ use tower::ServiceExt;
 
 /// Create test SQLite database with required schema
 async fn create_test_database() -> Result<sqlx::SqlitePool> {
-    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await?;
-
-    // Create channels table
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await?;
+    common::test_utils::schema::init_io_schema(&pool).await?;
     sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS channels (
-            channel_id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            protocol_type TEXT NOT NULL,
-            enabled BOOLEAN NOT NULL DEFAULT TRUE,
-            description TEXT,
-            config_json TEXT
-        )"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    // Insert a test channel (ID 1001)
-    sqlx::query(
-        r#"INSERT INTO channels (channel_id, name, protocol_type, enabled, description, config_json)
-           VALUES (1001, 'Test Channel', 'Virtual', 1, 'Test channel for CRUD tests', '{}')"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    // Create telemetry_points table
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS telemetry_points (
-            channel_id INTEGER NOT NULL,
-            point_id INTEGER NOT NULL,
-            signal_name TEXT NOT NULL,
-            scale REAL NOT NULL DEFAULT 1.0,
-            offset REAL NOT NULL DEFAULT 0.0,
-            unit TEXT,
-            reverse BOOLEAN NOT NULL DEFAULT FALSE,
-            data_type TEXT NOT NULL,
-            description TEXT,
-            protocol_mappings TEXT,
-            PRIMARY KEY (channel_id, point_id),
-            FOREIGN KEY (channel_id) REFERENCES channels(channel_id)
-        )"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    // Create signal_points table
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS signal_points (
-            channel_id INTEGER NOT NULL,
-            point_id INTEGER NOT NULL,
-            signal_name TEXT NOT NULL,
-            scale REAL NOT NULL DEFAULT 1.0,
-            offset REAL NOT NULL DEFAULT 0.0,
-            unit TEXT,
-            reverse BOOLEAN NOT NULL DEFAULT FALSE,
-            normal_state INTEGER DEFAULT 0,
-            data_type TEXT NOT NULL,
-            description TEXT,
-            protocol_mappings TEXT,
-            PRIMARY KEY (channel_id, point_id),
-            FOREIGN KEY (channel_id) REFERENCES channels(channel_id)
-        )"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    // Create control_points table
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS control_points (
-            channel_id INTEGER NOT NULL,
-            point_id INTEGER NOT NULL,
-            signal_name TEXT NOT NULL,
-            scale REAL NOT NULL DEFAULT 1.0,
-            offset REAL NOT NULL DEFAULT 0.0,
-            unit TEXT,
-            reverse BOOLEAN NOT NULL DEFAULT FALSE,
-            data_type TEXT NOT NULL,
-            description TEXT,
-            protocol_mappings TEXT,
-            PRIMARY KEY (channel_id, point_id),
-            FOREIGN KEY (channel_id) REFERENCES channels(channel_id)
-        )"#,
-    )
-    .execute(&pool)
-    .await?;
-
-    // Create adjustment_points table
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS adjustment_points (
-            channel_id INTEGER NOT NULL,
-            point_id INTEGER NOT NULL,
-            signal_name TEXT NOT NULL,
-            scale REAL NOT NULL DEFAULT 1.0,
-            offset REAL NOT NULL DEFAULT 0.0,
-            unit TEXT,
-            reverse BOOLEAN NOT NULL DEFAULT FALSE,
-            data_type TEXT NOT NULL,
-            description TEXT,
-            protocol_mappings TEXT,
-            PRIMARY KEY (channel_id, point_id),
-            FOREIGN KEY (channel_id) REFERENCES channels(channel_id)
-        )"#,
+        "INSERT INTO channels (channel_id, name, protocol, enabled, config) \
+         VALUES (1001, 'Test Channel', 'virtual', 0, '{}')",
     )
     .execute(&pool)
     .await?;

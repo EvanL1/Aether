@@ -1,5 +1,9 @@
 # CLI / Web 功能对等 Implementation Plan
 
+> **Historical migration plan — do not execute.** It describes the pre-split
+> EMS Console and direct service-port clients. Current authority is ADR-0007,
+> ADR-0012, the runtime manifest, and the published application API.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 给 `aether` CLI 补齐相对 Vue 前端缺失的能力（netsrv MQTT/证书、告警规则写操作、channels·instances 零碎缺口），使两者功能对等。

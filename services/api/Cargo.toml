@@ -51,6 +51,7 @@ dashmap = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
 arc-swap = "1.7"
+reqwest = { workspace = true }
 
 # JWT authentication
 jsonwebtoken = "9"
@@ -71,6 +72,7 @@ swagger-ui = ["utoipa-swagger-ui", "common/openapi"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tower = { workspace = true }
 
 [lints]
 workspace = true

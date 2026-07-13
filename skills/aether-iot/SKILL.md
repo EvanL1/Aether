@@ -36,8 +36,9 @@ generated application as an untrusted client of the application boundary.
 - For device onboarding, read `guides/connect-devices.md` and the active Pack knowledge.
 - For SDK embedding, read `crates/aether-sdk.md`, the minimal gateway example, and the local
   `AGENTS.md` files governing the target directory.
-- Before any write that can reach configuration or hardware, read the applicable safe-operations
-  guidance and inspect the capability's current OpenAPI or MCP metadata.
+- Before any write that can reach configuration or hardware, read
+  `guides/safe-operations.md`, then the active Pack's additional safety guidance, and inspect the
+  capability's current OpenAPI or MCP metadata.
 
 ## Build applications contract-first
 

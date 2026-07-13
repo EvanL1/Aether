@@ -470,4 +470,4 @@ derived results; it does not absorb the systems on either side.
 - [Shared Memory](shared-memory.md) — current live-state authority and writer ownership
 - [System Architecture](architecture.md) — runtime services and optional extensions
 - [Rule Engine](rule-engine.md) — deterministic scheduling and execution
-- [Safe Operations for AI Agents](../domain/safe-operations.md) — control safety and authorization policy
+- [Safe Operations for Applications and Agents](../guides/safe-operations.md) — control safety and authorization policy

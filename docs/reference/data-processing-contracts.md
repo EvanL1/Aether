@@ -1066,7 +1066,7 @@ activating a model or dispatching a control plan.
 ## Related pages
 
 - [Connect Data Processors](../guides/data-processors.md) — declare a task and route a processor
-- [Power Forecasting](../domain/power-forecasting.md) — first forecast contract and migration target
+- [AetherEMS Power Forecasting](https://github.com/EvanL1/AetherEMS/blob/main/packs/energy/knowledge/power-forecasting.md) — first downstream forecast contract
 - [JSON Schemas](../../contracts/data-processing/README.md) — strict machine-readable v1 wire guards
 - [Load-Forecasting Processor](../../integrations/load-forecasting/README.md) — request-driven Edge-Platform implementation
 - [Data Flow](../concepts/data-flow.md) — SHM and history authority

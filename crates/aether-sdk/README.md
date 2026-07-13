@@ -13,7 +13,7 @@ manifest loader. Loading a pack validates compatibility and confined asset
 directories; it never installs or commissions the pack.
 
 For a runnable zero-external-service composition, see the repository's
-[`examples/minimal-gateway`](https://github.com/EvanL1/Aether/tree/main/examples/minimal-gateway).
+[`examples/minimal-gateway`](https://github.com/EvanL1/AetherIot/tree/main/examples/minimal-gateway).
 
 ```bash
 cargo test -p aether-edge-sdk

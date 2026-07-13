@@ -1,5 +1,9 @@
 # Bare-Metal Linux Install (No Docker) Implementation Plan
 
+> **Historical migration plan — do not execute.** The bundled Redis/nginx/Vue
+> distribution described here is not the AetherIot default. Use ADR-0006,
+> ADR-0007, and the current deployment guide instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Install and run the full AetherEMS stack (6 Rust services + Redis + the Vue web UI) on a Docker-free Linux target (arm64/amd64) via one self-contained `.run` package, supervised by systemd.
