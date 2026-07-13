@@ -58,9 +58,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check advisories, licenses, bans, and sources
-        # Pin the last known-good v2 revision. The moving v2 tag briefly shipped
-        # an action.yml/entrypoint argument mismatch on 2026-07-13.
-        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        # Pin a reviewed revision so a moving tag cannot change the action
+        # contract underneath this workflow.
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           rust-version: "1.90.0"
           command: check

@@ -42,6 +42,9 @@ updates:
           - minor
           - patch
     ignore:
+      # The action ref is the repository's pinned Rust release, not an
+      # independently upgradeable action version.
+      - dependency-name: "dtolnay/rust-toolchain"
       - dependency-name: "*"
         update-types:
           - version-update:semver-major
