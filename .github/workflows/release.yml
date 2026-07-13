@@ -37,6 +37,11 @@ jobs:
           version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install release boundary tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
+
       - name: Cache Dependencies
         uses: actions/cache@v4
         with:
