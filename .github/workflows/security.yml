@@ -60,7 +60,7 @@ jobs:
       - name: Check advisories, licenses, bans, and sources
         # Pin the last known-good v2 revision. The moving v2 tag briefly shipped
         # an action.yml/entrypoint argument mismatch on 2026-07-13.
-        uses: EmbarkStudios/cargo-deny-action@3f8dc3eed75398519a06f6a0b9dd5db5f833dd74 # v2
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
         with:
           rust-version: "1.90.0"
           command: check
