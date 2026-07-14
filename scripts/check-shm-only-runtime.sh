@@ -84,16 +84,30 @@ if [[ "$COMPOSE_TEST_SECRET" == "$COMPOSE_TEST_UPLINK_TOKEN" ]]; then
     exit 1
 fi
 
-if JWT_SECRET_KEY="$COMPOSE_TEST_SECRET" \
-    AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_TEST_UPLINK_TOKEN" \
-    docker compose config --services | rg -q '^aether-redis$'; then
+default_services=""
+if ! default_services=$(
+    JWT_SECRET_KEY="$COMPOSE_TEST_SECRET" \
+        AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_TEST_UPLINK_TOKEN" \
+        docker compose config --services
+); then
+    echo "ERROR: default Compose runtime is invalid" >&2
+    exit 1
+fi
+if rg -q '^aether-redis$' <<< "$default_services"; then
     echo "ERROR: Redis is part of the default Compose runtime" >&2
     exit 1
 fi
 
-if ! JWT_SECRET_KEY="$COMPOSE_TEST_SECRET" \
-    AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_TEST_UPLINK_TOKEN" \
-    docker compose --profile redis config --services | rg -q '^aether-redis$'; then
+redis_services=""
+if ! redis_services=$(
+    JWT_SECRET_KEY="$COMPOSE_TEST_SECRET" \
+        AETHER_UPLINK_CONTROL_TOKEN="$COMPOSE_TEST_UPLINK_TOKEN" \
+        docker compose --profile redis config --services
+); then
+    echo "ERROR: optional Redis extension profile is invalid" >&2
+    exit 1
+fi
+if ! rg -q '^aether-redis$' <<< "$redis_services"; then
     echo "ERROR: optional Redis extension profile is missing" >&2
     exit 1
 fi
