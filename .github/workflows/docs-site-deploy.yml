@@ -84,7 +84,9 @@ jobs:
           }
 
           token=$(trim "$RAW_TOKEN")
-          token=${token#CLOUDFLARE_API_TOKEN=}
+          if [[ "$token" =~ ^(export[[:space:]]+)?CLOUDFLARE_API_TOKEN[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            token=${BASH_REMATCH[2]}
+          fi
           token=$(trim "$token")
 
           if (( ${#token} >= 2 )); then
