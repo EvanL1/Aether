@@ -87,6 +87,15 @@ cargo run -p aether-example-minimal-gateway
 cargo run -p aether-example-energy-gateway
 ```
 
+Downstream Rust applications consume one facade from a versioned source
+release. Internal workspace crates are implementation boundaries, not
+independently supported registry packages:
+
+```toml
+[dependencies]
+aether-sdk = { package = "aether-edge-sdk", git = "https://github.com/EvanL1/AetherIot.git", tag = "v0.5.0", features = ["local-runtime"] }
+```
+
 The first is an empty industry-neutral gateway. The second proves a disabled-by-default Energy Pack
 composition. They are SDK smoke tests, not the supervised production runtime.
 
@@ -123,7 +132,8 @@ SHM epochs, embedded local operation, governed commands, MCP interface, and Open
 are available. The first independent signed public release and removal of the remaining
 revisionless compatibility paths are still pending. See [Architecture](ARCHITECTURE.md),
 [ADR-0007](docs/adr/0007-aether-core-and-ems-distribution.md), and
-[ADR-0012](docs/adr/0012-agent-first-application-surface.md) for the exact boundaries.
+[ADR-0012](docs/adr/0012-agent-first-application-surface.md), and
+[ADR-0013](docs/adr/0013-single-sdk-source-release.md) for the exact boundaries.
 
 ## Documentation
 

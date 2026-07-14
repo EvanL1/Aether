@@ -4,8 +4,9 @@
 
 Accepted for staged implementation on 2026-07-11. The physical AetherEMS
 repository split, downstream bootstrap CI, and EMS Console ownership were
-completed on 2026-07-13. The first independent signed publication and
-replacement of the bootstrap Git pin remain incomplete.
+completed on 2026-07-13. ADR-0013 defines the single-facade source release
+needed to replace the bootstrap pin; producing and consuming that signed
+release remain the final external gate.
 
 ## Context
 
@@ -48,8 +49,10 @@ still need synchronized source edits until those external gates are closed.
    repository from an identified integration-workspace commit. The initial
    public-kernel commit records that source SHA and links back to the retained
    history. This repository then becomes the thin `AetherEMS` distribution.
-8. AetherEMS consumes versioned Aether artifacts or crates. It is not a fork
-   and does not use a Git submodule for the kernel.
+8. AetherEMS consumes the exact commit of a signed AetherIot source release
+   through the single `aether-edge-sdk` facade. It is not a fork and does not
+   use a Git submodule for the kernel. Internal workspace crates are not
+   independently published products.
 
 ## Repository ownership after extraction
 
@@ -151,8 +154,8 @@ only after all of the following are true:
 2. Energy models no longer resolve through `legacy_assets` paths.
 3. Core manifests and source contain no energy product constants or default
    site configuration.
-4. Aether crates and runtime artifacts are released with compatible version
-   metadata.
+4. The AetherIot source facade and runtime artifacts are released with
+   compatible version metadata, checksums, and provenance.
 5. AetherEMS CI consumes those released artifacts and passes its pack,
    configuration, safety, and composition conformance suites.
 6. The complete Aether runtime can install and start with an empty,

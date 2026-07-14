@@ -23,3 +23,9 @@ pub mod pack {
 pub mod ports {
     pub use aether_ports::*;
 }
+
+/// Zero-external-service adapters for composing one local edge runtime.
+#[cfg(feature = "local-runtime")]
+pub mod local {
+    pub use aether_store_local::*;
+}

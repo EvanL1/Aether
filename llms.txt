@@ -34,6 +34,7 @@ read-only historian directory/identity for `aether-api`; the base
 - [ADR-0007](docs/adr/0007-aether-core-and-ems-distribution.md): Staged separation of the Aether kernel and AetherEMS energy distribution without rewriting Git history
 - [ADR-0009](docs/adr/0009-aether-data-processing.md): Accepted industry-neutral task, processor direction, derived-data authority, opt-in API/sidecar composition, and reserved future runtime decision
 - [ADR-0012](docs/adr/0012-agent-first-application-surface.md): Headless Kernel, Agent Skill, generated-client, and single remote application boundary
+- [ADR-0013](docs/adr/0013-single-sdk-source-release.md): Single SDK facade, source-only workspace packages, and signed Git/source distribution
 - [Target Repository Layout](docs/architecture/target-layout.md): Core crates, optional extensions, interfaces, and domain packs
 - [Pack Contract Crate](crates/aether-pack/README.md): Versioned manifest loading, release compatibility, required identifiers, fail-safe examples, and pack-root path confinement
 - [SHM Data Plane Crate](crates/aether-dataplane/README.md): Layout ownership, mmap validation, seqlock safety, and compatibility imports

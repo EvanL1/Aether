@@ -1,12 +1,13 @@
 [package]
 name = "aether-edge-sdk"
 version.workspace = true
+publish = false
 edition = "2024"
 rust-version = "1.90"
 description = "Stable public facade for embedding the Aether edge kernel"
 license.workspace = true
 repository.workspace = true
-documentation = "https://docs.rs/aether-edge-sdk"
+documentation = "https://docs.aetheriot.workers.dev/crates/aether-sdk"
 readme = "README.md"
 keywords = ["iot", "edge", "gateway", "sdk", "shm"]
 categories = ["embedded", "asynchronous"]
@@ -14,11 +15,16 @@ categories = ["embedded", "asynchronous"]
 [lib]
 name = "aether_sdk"
 
+[features]
+default = []
+local-runtime = ["dep:aether-store-local"]
+
 [dependencies]
 aether-application = { version = "0.5.0", path = "../aether-application" }
 aether-domain = { version = "0.5.0", path = "../aether-domain" }
 aether-pack = { version = "0.5.0", path = "../aether-pack" }
 aether-ports = { version = "0.5.0", path = "../aether-ports" }
+aether-store-local = { version = "0.5.0", path = "../../extensions/store-local", optional = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

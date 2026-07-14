@@ -26,7 +26,7 @@ readonly REQUIRED_FILES=(
     .github/workflows/security.yml
 )
 
-readonly PUBLIC_PACKAGES=(
+readonly SDK_SOURCE_PACKAGES=(
     "aether-domain:crates/aether-domain"
     "aether-dataplane:crates/aether-dataplane"
     "aether-ports:crates/aether-ports"
@@ -82,10 +82,10 @@ manifest_package_name() {
     ' "$1"
 }
 
-is_public_package() {
+is_sdk_source_package() {
     local candidate=$1
     local entry
-    for entry in "${PUBLIC_PACKAGES[@]}"; do
+    for entry in "${SDK_SOURCE_PACKAGES[@]}"; do
         if [[ ${entry%%:*} == "$candidate" ]]; then
             return 0
         fi
@@ -104,8 +104,8 @@ if ! rg -q '^channel[[:space:]]*=[[:space:]]*"1\.90\.0"' rust-toolchain.toml; th
     fail "rust-toolchain.toml must pin Rust 1.90.0"
 fi
 
-echo "Checking public package metadata..."
-for entry in "${PUBLIC_PACKAGES[@]}"; do
+echo "Checking SDK source package metadata..."
+for entry in "${SDK_SOURCE_PACKAGES[@]}"; do
     package=${entry%%:*}
     directory=${entry#*:}
     manifest="$directory/Cargo.toml"
@@ -146,8 +146,8 @@ for entry in "${PUBLIC_PACKAGES[@]}"; do
     if ! rg -q '^repository(\.workspace)?[[:space:]]*=' "$manifest"; then
         fail "$manifest must declare or inherit its repository"
     fi
-    if ! rg -q '^documentation[[:space:]]*=[[:space:]]*"https://docs\.rs/' "$manifest"; then
-        fail "$manifest must link to its docs.rs documentation"
+    if ! rg -q '^documentation[[:space:]]*=[[:space:]]*"https://docs\.aetheriot\.workers\.dev/' "$manifest"; then
+        fail "$manifest must link to the versioned AetherIot documentation"
     fi
     if ! rg -q '^readme[[:space:]]*=[[:space:]]*"README\.md"' "$manifest"; then
         fail "$manifest must declare README.md"
@@ -155,15 +155,15 @@ for entry in "${PUBLIC_PACKAGES[@]}"; do
     if [[ ! -s "$directory/README.md" ]]; then
         fail "$package README is missing or empty: $directory/README.md"
     fi
-    if rg -q '^publish[[:space:]]*=[[:space:]]*false' "$manifest"; then
-        fail "$package is public but marked publish=false"
+    if ! rg -q '^publish[[:space:]]*=[[:space:]]*false' "$manifest"; then
+        fail "$package is a source-only implementation package and must set publish=false"
     fi
 done
 
-echo "Checking that every non-public Rust package is explicitly private..."
+echo "Checking that every other Rust package is explicitly private..."
 while IFS= read -r manifest; do
     package=$(manifest_package_name "$manifest")
-    if [[ -z "$package" ]] || is_public_package "$package"; then
+    if [[ -z "$package" ]] || is_sdk_source_package "$package"; then
         continue
     fi
     if ! rg -q '^publish[[:space:]]*=[[:space:]]*false' "$manifest"; then
@@ -306,31 +306,18 @@ else
     fi
 fi
 
-echo "Checking that public crates can be assembled for publication..."
-for entry in "${PUBLIC_PACKAGES[@]}"; do
-    package=${entry%%:*}
-    if ! cargo package --package "$package" --allow-dirty \
-        --exclude-lockfile --no-verify --quiet; then
-        fail "cargo package failed for $package"
-        continue
-    fi
-
-    package_id=$(cargo pkgid --package "$package")
-    version=${package_id##*#}
-    version=${version##*@}
-    archive_prefix="${package}-${version}"
-    archive="target/package/${archive_prefix}.crate"
-    if [[ ! -s "$archive" ]]; then
-        fail "cargo package did not create $archive"
-        continue
-    fi
-    for license_name in LICENSE-MIT LICENSE-APACHE; do
-        if ! tar -xOf "$archive" "${archive_prefix}/${license_name}" \
-            | cmp -s - "$license_name"; then
-            fail "$archive does not contain the canonical $license_name text"
-        fi
-    done
-done
+echo "Checking the signed source-release boundary..."
+if rg -n 'cargo publish|CARGO_REGISTRY_TOKEN|publish-crates' .github/workflows/release.yml; then
+    fail "the source release workflow must not publish workspace crates"
+fi
+if ! rg -q 'aetheriot-source-\$\{GITHUB_REF_NAME\}\.tar\.gz' \
+    .github/workflows/release.yml; then
+    fail "the source release workflow must build a versioned source archive"
+fi
+if ! rg -q 'release/aetheriot-source-\*\.tar\.gz' \
+    .github/workflows/release.yml; then
+    fail "the source archive must be covered by release provenance"
+fi
 
 if ((failures > 0)); then
     echo "Open-source readiness failed with $failures error(s)" >&2

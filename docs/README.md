@@ -4,6 +4,7 @@
 Runtime 已可使用，但部分生产路径仍在从兼容层迁移，AetherEMS Energy Pack 也尚未
 完成独立发行。项目边界与拆分条件见
 [ADR-0007](./adr/0007-aether-core-and-ems-distribution.md)。
+[ADR-0013](./adr/0013-single-sdk-source-release.md) 规定了单一 SDK façade 与签名源码发行边界。
 
 ## 开始使用
 

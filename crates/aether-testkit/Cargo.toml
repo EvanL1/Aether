@@ -1,12 +1,13 @@
 [package]
 name = "aether-testkit"
 version.workspace = true
+publish = false
 edition = "2024"
 rust-version = "1.90"
 description = "Conformance suites for Aether port implementations"
 license.workspace = true
 repository.workspace = true
-documentation = "https://docs.rs/aether-testkit"
+documentation = "https://docs.aetheriot.workers.dev/crates/aether-testkit"
 readme = "README.md"
 keywords = ["iot", "edge", "gateway", "testing"]
 categories = ["development-tools::testing"]

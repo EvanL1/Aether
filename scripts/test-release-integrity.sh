@@ -21,6 +21,15 @@ assert_file_contains() {
         || fail "$file does not contain required release-integrity rule: $expected"
 }
 
+assert_file_not_contains() {
+    local file=$1
+    local forbidden=$2
+
+    if grep -Fq "$forbidden" "$file"; then
+        fail "$file contains forbidden release behavior: $forbidden"
+    fi
+}
+
 link_command() {
     local destination=$1
     local command_name=$2
@@ -240,5 +249,35 @@ assert_file_contains "$RELEASE_WORKFLOW" 'release/${{ steps.version.outputs.arti
 assert_file_contains "$RELEASE_WORKFLOW" 'release/AetherEdge-arm64-${{ steps.version.outputs.version }}.run.sha256'
 assert_file_contains "$RELEASE_WORKFLOW" 'release/AetherEdge-amd64-${{ steps.version.outputs.version }}.run.sha256'
 assert_file_contains "$RELEASE_WORKFLOW" '(cd release && sha256sum -c ./*.sha256)'
+
+echo "Testing the release is source-and-binary only..."
+assert_file_not_contains "$RELEASE_WORKFLOW" 'cargo publish'
+assert_file_not_contains "$RELEASE_WORKFLOW" 'CARGO_REGISTRY_TOKEN'
+assert_file_not_contains "$RELEASE_WORKFLOW" 'publish-crates'
+assert_file_contains "$RELEASE_WORKFLOW" 'aetheriot-source-${GITHUB_REF_NAME}.tar.gz'
+assert_file_contains "$RELEASE_WORKFLOW" 'release/aetheriot-source-*.tar.gz'
+assert_file_contains "$RELEASE_WORKFLOW" 'release/aetheriot-source-${{ github.ref_name }}.tar.gz.sha256'
+
+echo "Testing workspace implementation crates cannot be published..."
+private_manifests=(
+    crates/aether-application/Cargo.toml
+    crates/aether-data-processing/Cargo.toml
+    crates/aether-dataplane/Cargo.toml
+    crates/aether-domain/Cargo.toml
+    crates/aether-pack/Cargo.toml
+    crates/aether-ports/Cargo.toml
+    crates/aether-sdk/Cargo.toml
+    crates/aether-testkit/Cargo.toml
+    extensions/http-data-processor/Cargo.toml
+    extensions/http-history-query/Cargo.toml
+    extensions/postgres-history/Cargo.toml
+    extensions/redis-bridge/Cargo.toml
+    extensions/shm-bridge/Cargo.toml
+    extensions/sqlite-history-query/Cargo.toml
+    extensions/store-local/Cargo.toml
+)
+for manifest in "${private_manifests[@]}"; do
+    assert_file_contains "$ROOT_DIR/$manifest" 'publish = false'
+done
 
 echo "Release integrity tests passed."

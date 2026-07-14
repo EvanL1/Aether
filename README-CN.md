@@ -81,6 +81,14 @@ cargo run -p aether-example-minimal-gateway
 cargo run -p aether-example-energy-gateway
 ```
 
+下游 Rust 应用只消费版本化源码发行中的单一 façade。workspace 内部 crate 是实现边界，不是
+可独立支持的 registry 产品：
+
+```toml
+[dependencies]
+aether-sdk = { package = "aether-edge-sdk", git = "https://github.com/EvanL1/AetherIot.git", tag = "v0.5.0", features = ["local-runtime"] }
+```
+
 前者是行业中立的空网关；后者验证默认禁用的 Energy Pack 组合。它们是 SDK 冒烟测试，不是
 受监管的生产运行时。
 
@@ -115,7 +123,8 @@ AetherIot 当前为 beta。版本化 SDK、Pack v1、六服务 Runtime、point/h
 嵌入式本地运行、受治理命令、MCP 接口和 OpenAPI 契约检查已经可用。首次独立签名公开发行和
 剩余无 revision 兼容路径的清理仍未完成。精确边界见[架构说明](ARCHITECTURE.md)、
 [ADR-0007](docs/adr/0007-aether-core-and-ems-distribution.md)与
-[ADR-0012](docs/adr/0012-agent-first-application-surface.md)。
+[ADR-0012](docs/adr/0012-agent-first-application-surface.md)、
+[ADR-0013](docs/adr/0013-single-sdk-source-release.md)。
 
 ## 文档
 
