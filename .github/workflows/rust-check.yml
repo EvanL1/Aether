@@ -24,6 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install repository policy tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
+
       - name: Check CI verification policy
         run: ./scripts/test-ci-verification-policy.sh
 
@@ -63,6 +68,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Install ignored-test scan tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
 
       - name: Find ignored tests
         shell: bash
