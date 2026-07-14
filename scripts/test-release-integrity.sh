@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALLER="$ROOT_DIR/tools/aether/install.sh"
 INSTALLER_BUILDER="$ROOT_DIR/scripts/build-installer.sh"
 RELEASE_WORKFLOW="$ROOT_DIR/.github/workflows/release.yml"
+WITHDRAW_WORKFLOW="$ROOT_DIR/.github/workflows/withdraw-accidental-crates.yml"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -269,6 +270,14 @@ assert_file_not_contains "$RELEASE_WORKFLOW" 'publish-crates'
 assert_file_contains "$RELEASE_WORKFLOW" 'aetheriot-source-${GITHUB_REF_NAME}.tar.gz'
 assert_file_contains "$RELEASE_WORKFLOW" 'release/aetheriot-source-*.tar.gz'
 assert_file_contains "$RELEASE_WORKFLOW" 'release/aetheriot-source-${{ github.ref_name }}.tar.gz.sha256'
+
+echo "Testing accidental crate withdrawal accepts versions that were never published..."
+[[ "$(grep -Fc -- "--write-out '%{http_code}'" "$WITHDRAW_WORKFLOW")" == 2 ]] \
+    || fail "withdrawal and verification must both inspect the crates.io HTTP status"
+[[ "$(grep -Fc -- '[[ "$http_status" == 404 ]]' "$WITHDRAW_WORKFLOW")" == 2 ]] \
+    || fail "withdrawal and verification must both treat missing versions as resolved"
+assert_file_contains "$WITHDRAW_WORKFLOW" 'was never published; nothing to yank'
+assert_file_contains "$WITHDRAW_WORKFLOW" 'was never published; no yank required'
 
 echo "Testing Kernel and CLI artifacts remain independently attested..."
 assert_file_contains "$RELEASE_WORKFLOW" 'name: ${{ matrix.arch }}-kernel-runtime'

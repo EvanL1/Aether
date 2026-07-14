@@ -38,11 +38,30 @@ jobs:
             aether-store-local
           )
           failures=0
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
           for crate in "${crates[@]}"; do
-            if curl --fail --silent --show-error \
+            if ! http_status="$(curl --silent --show-error \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
               --user-agent 'AetherIot release cleanup (https://github.com/EvanL1/AetherIot)' \
-              "https://crates.io/api/v1/crates/$crate/0.5.0" \
-              | python3 -c 'import json, sys; raise SystemExit(not json.load(sys.stdin)["version"]["yanked"])'; then
+              "https://crates.io/api/v1/crates/$crate/0.5.0")"; then
+              echo "Failed to query crates.io for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if [[ "$http_status" == 404 ]]; then
+              echo "$crate@0.5.0 was never published; nothing to yank"
+              continue
+            fi
+            if [[ "$http_status" != 200 ]]; then
+              echo "Unexpected crates.io status $http_status for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if python3 -c \
+              'import json, sys; raise SystemExit(not json.load(sys.stdin)["version"]["yanked"])' \
+              < "$response_file"; then
               echo "$crate@0.5.0 is already yanked"
               continue
             fi
@@ -68,9 +87,33 @@ jobs:
             aether-shm-bridge
             aether-store-local
           )
+          failures=0
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
           for crate in "${crates[@]}"; do
-            curl --fail --silent --show-error \
+            if ! http_status="$(curl --silent --show-error \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
               --user-agent 'AetherIot release cleanup (https://github.com/EvanL1/AetherIot)' \
-              "https://crates.io/api/v1/crates/$crate/0.5.0" \
-              | python3 -c 'import json, sys; assert json.load(sys.stdin)["version"]["yanked"] is True'
+              "https://crates.io/api/v1/crates/$crate/0.5.0")"; then
+              echo "Failed to query crates.io for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if [[ "$http_status" == 404 ]]; then
+              echo "$crate@0.5.0 was never published; no yank required"
+              continue
+            fi
+            if [[ "$http_status" != 200 ]]; then
+              echo "Unexpected crates.io status $http_status for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if ! python3 -c \
+              'import json, sys; assert json.load(sys.stdin)["version"]["yanked"] is True' \
+              < "$response_file"; then
+              echo "$crate@0.5.0 is not yanked" >&2
+              failures=$((failures + 1))
+            fi
           done
+          ((failures == 0))
