@@ -35,6 +35,8 @@ read-only historian directory/identity for `aether-api`; the base
 - [ADR-0009](docs/adr/0009-aether-data-processing.md): Accepted industry-neutral task, processor direction, derived-data authority, opt-in API/sidecar composition, and reserved future runtime decision
 - [ADR-0012](docs/adr/0012-agent-first-application-surface.md): Headless Kernel, Agent Skill, generated-client, and single remote application boundary
 - [ADR-0013](docs/adr/0013-single-sdk-source-release.md): Single SDK facade, source-only workspace packages, and signed Git/source distribution
+- [ADR-0014](docs/adr/0014-coordinated-shm-topology-publication.md): Coordinated point/health SHM publication epochs and rolling compatibility
+- [ADR-0015](docs/adr/0015-configuration-authority-and-reconciliation.md): Configuration authority, revisioned mutation, and applied-state reconciliation
 - [Target Repository Layout](docs/architecture/target-layout.md): Core crates, optional extensions, interfaces, and domain packs
 - [Pack Contract Crate](crates/aether-pack/README.md): Versioned manifest loading, release compatibility, required identifiers, fail-safe examples, and pack-root path confinement
 - [SHM Data Plane Crate](crates/aether-dataplane/README.md): Layout ownership, mmap validation, seqlock safety, and compatibility imports

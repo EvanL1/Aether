@@ -30,19 +30,20 @@
 
 <!-- Check commands actually run. Explain failures and skipped checks. -->
 
-- [ ] Focused affected test(s)
-- [ ] `cargo fmt --all -- --check`
-- [ ] `./scripts/check-architecture.sh`
-- [ ] `cargo check --workspace`
-- [ ] Full workspace Clippy check (command below)
-- [ ] Runtime panic-boundary Clippy check (command below)
-- [ ] `cargo test --workspace --lib --bins`
+- [ ] Focused affected check(s)
+- [ ] Changed YAML and shell files were parsed or linted where applicable.
+- [ ] Architecture boundaries were checked when dependency direction,
+      composition, or live-state authority changed.
+- [ ] External-service tests are explicitly marked and excluded from the
+      default local path.
+
+Full workspace verification is provided by PR CI. Do not duplicate the full
+CI suite locally unless preparing a release or investigating a CI-only failure.
 
 Commands and results:
 
 ```text
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo clippy --workspace --lib --bins -- -D clippy::unwrap_used -D clippy::expect_used
+List only the focused commands actually run locally.
 ```
 
 ## Tests, documentation, and migration

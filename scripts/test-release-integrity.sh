@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALLER="$ROOT_DIR/tools/aether/install.sh"
 INSTALLER_BUILDER="$ROOT_DIR/scripts/build-installer.sh"
 RELEASE_WORKFLOW="$ROOT_DIR/.github/workflows/release.yml"
+WITHDRAW_WORKFLOW="$ROOT_DIR/.github/workflows/withdraw-accidental-crates.yml"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -244,6 +245,8 @@ run_installer_case unsupported-windows-arm64 MINGW64_NT arm64 sha256sum "$MATCHI
 echo "Testing full installer checksums remain in the release workflow..."
 # The following arguments are literal GitHub Actions and shell snippets.
 assert_file_contains "$RELEASE_WORKFLOW" './scripts/test-release-integrity.sh'
+assert_file_contains "$RELEASE_WORKFLOW" './scripts/test-extraction-readiness.sh'
+assert_file_contains "$RELEASE_WORKFLOW" './scripts/check-extraction-readiness.sh --local-only'
 assert_file_contains "$RELEASE_WORKFLOW" 'sha256sum "$ARTIFACT_NAME" > "${ARTIFACT_NAME}.sha256"'
 assert_file_contains "$RELEASE_WORKFLOW" 'sha256sum "$AETHER_TAR_NAME" > "${AETHER_TAR_NAME}.sha256"'
 assert_file_contains "$RELEASE_WORKFLOW" 'release/${{ steps.version.outputs.artifact_name }}.sha256'
@@ -268,6 +271,27 @@ assert_file_contains "$RELEASE_WORKFLOW" 'aetheriot-source-${GITHUB_REF_NAME}.ta
 assert_file_contains "$RELEASE_WORKFLOW" 'release/aetheriot-source-*.tar.gz'
 assert_file_contains "$RELEASE_WORKFLOW" 'release/aetheriot-source-${{ github.ref_name }}.tar.gz.sha256'
 
+echo "Testing accidental crate withdrawal accepts versions that were never published..."
+[[ "$(grep -Fc -- "--write-out '%{http_code}'" "$WITHDRAW_WORKFLOW")" == 2 ]] \
+    || fail "withdrawal and verification must both inspect the crates.io HTTP status"
+[[ "$(grep -Fc -- '[[ "$http_status" == 404 ]]' "$WITHDRAW_WORKFLOW")" == 2 ]] \
+    || fail "withdrawal and verification must both treat missing versions as resolved"
+assert_file_contains "$WITHDRAW_WORKFLOW" 'was never published; nothing to yank'
+assert_file_contains "$WITHDRAW_WORKFLOW" 'was never published; no yank required'
+
+echo "Testing Kernel and CLI artifacts remain independently attested..."
+assert_file_contains "$RELEASE_WORKFLOW" 'name: ${{ matrix.arch }}-kernel-runtime'
+assert_file_contains "$RELEASE_WORKFLOW" 'name: aether-linux-${{ matrix.zig_arch }}'
+assert_file_not_contains "$RELEASE_WORKFLOW" 'aetherems-energy-pack-'
+assert_file_not_contains "$RELEASE_WORKFLOW" 'distributions/aetherems/'
+assert_file_contains "$RELEASE_WORKFLOW" 'uses: actions/attest@v4'
+assert_file_contains "$RELEASE_WORKFLOW" 'attestations: write'
+assert_file_contains "$RELEASE_WORKFLOW" 'id-token: write'
+[[ "$(grep -Fc 'artifact-metadata: write' "$RELEASE_WORKFLOW")" == 2 ]] \
+    || fail "both artifact-attestation jobs must grant artifact-metadata: write"
+assert_file_contains "$RELEASE_WORKFLOW" 'subject-path: release/${{ steps.version.outputs.artifact_name }}'
+assert_file_contains "$RELEASE_WORKFLOW" 'subject-path: release/aether-linux-${{ matrix.zig_arch }}.tar.gz'
+
 echo "Testing workspace implementation crates cannot be published..."
 private_manifests=(
     crates/aether-application/Cargo.toml
@@ -289,5 +313,15 @@ private_manifests=(
 for manifest in "${private_manifests[@]}"; do
     assert_file_contains "$ROOT_DIR/$manifest" 'publish = false'
 done
+
+echo "Testing runtime-manifest binary source survives clean checkouts..."
+RUNTIME_MANIFEST_SOURCE="$ROOT_DIR/libs/aether-runtime-catalog/src/bin/aether-runtime-manifest.rs"
+[[ -s "$RUNTIME_MANIFEST_SOURCE" ]] \
+    || fail "runtime-manifest binary source is missing"
+if git -C "$ROOT_DIR" check-ignore -q "$RUNTIME_MANIFEST_SOURCE"; then
+    fail "runtime-manifest binary source is ignored"
+fi
+assert_file_contains "$ROOT_DIR/.gitignore" '!**/src/bin/'
+assert_file_contains "$ROOT_DIR/.gitignore" '!**/src/bin/**'
 
 echo "Release integrity tests passed."

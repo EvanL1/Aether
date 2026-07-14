@@ -23,6 +23,10 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            echo "CARGO_REGISTRY_TOKEN must be a crates.io token with yank permission" >&2
+            exit 1
+          fi
           crates=(
             aether-domain
             aether-dataplane
@@ -33,11 +37,43 @@ jobs:
             aether-shm-bridge
             aether-store-local
           )
+          failures=0
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
           for crate in "${crates[@]}"; do
-            cargo yank --vers 0.5.0 "$crate"
+            if ! http_status="$(curl --silent --show-error \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              --user-agent 'AetherIot release cleanup (https://github.com/EvanL1/AetherIot)' \
+              "https://crates.io/api/v1/crates/$crate/0.5.0")"; then
+              echo "Failed to query crates.io for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if [[ "$http_status" == 404 ]]; then
+              echo "$crate@0.5.0 was never published; nothing to yank"
+              continue
+            fi
+            if [[ "$http_status" != 200 ]]; then
+              echo "Unexpected crates.io status $http_status for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if python3 -c \
+              'import json, sys; raise SystemExit(not json.load(sys.stdin)["version"]["yanked"])' \
+              < "$response_file"; then
+              echo "$crate@0.5.0 is already yanked"
+              continue
+            fi
+            if ! cargo yank --vers 0.5.0 "$crate"; then
+              echo "Failed to yank $crate@0.5.0; verify that CARGO_REGISTRY_TOKEN has yank permission for this crate" >&2
+              failures=$((failures + 1))
+            fi
           done
+          ((failures == 0))
 
       - name: Verify every version is yanked
+        if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -51,9 +87,33 @@ jobs:
             aether-shm-bridge
             aether-store-local
           )
+          failures=0
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
           for crate in "${crates[@]}"; do
-            curl --fail --silent --show-error \
+            if ! http_status="$(curl --silent --show-error \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
               --user-agent 'AetherIot release cleanup (https://github.com/EvanL1/AetherIot)' \
-              "https://crates.io/api/v1/crates/$crate/0.5.0" \
-              | python3 -c 'import json, sys; assert json.load(sys.stdin)["version"]["yanked"] is True'
+              "https://crates.io/api/v1/crates/$crate/0.5.0")"; then
+              echo "Failed to query crates.io for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if [[ "$http_status" == 404 ]]; then
+              echo "$crate@0.5.0 was never published; no yank required"
+              continue
+            fi
+            if [[ "$http_status" != 200 ]]; then
+              echo "Unexpected crates.io status $http_status for $crate@0.5.0" >&2
+              failures=$((failures + 1))
+              continue
+            fi
+            if ! python3 -c \
+              'import json, sys; assert json.load(sys.stdin)["version"]["yanked"] is True' \
+              < "$response_file"; then
+              echo "$crate@0.5.0 is not yanked" >&2
+              failures=$((failures + 1))
+            fi
           done
+          ((failures == 0))

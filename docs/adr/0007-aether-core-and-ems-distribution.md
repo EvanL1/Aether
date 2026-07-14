@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted for staged implementation on 2026-07-11. The physical AetherEMS
-repository split, downstream bootstrap CI, and EMS Console ownership were
-completed on 2026-07-13. ADR-0013 defines the single-facade source release
-needed to replace the bootstrap pin; producing and consuming that signed
-release remain the final external gate.
+Accepted. Repository-local artifact and extraction gates were implemented on
+2026-07-13. The physical AetherEMS repository split, downstream bootstrap CI,
+and EMS Console ownership are complete. AetherIot `v0.5.0` supplied the signed
+single-facade source/runtime/CLI release on 2026-07-14. Replacing the AetherEMS
+bootstrap pin and publishing its independently signed Pack remain incomplete.
 
 ## Context
 
@@ -22,8 +22,8 @@ clones. Splitting repositories before the remaining release gates would create
 a different problem. Production model and MCP knowledge loading are now
 runtime-only and Pack-owned. Mappings, rules, and evaluations are also indexed
 Pack artifacts, and the local Kernel CLI now installs a checksummed Pack-only
-bundle. The remaining gates are independently published/signed Kernel and Pack
-artifacts plus downstream CI consuming them. Two repositories would otherwise
+bundle. The remaining gates are an independently published/signed Pack and
+downstream CI consuming the signed Kernel and Pack releases. Two repositories would otherwise
 still need synchronized source edits until those external gates are closed.
 
 ## Decision
@@ -117,6 +117,10 @@ The staged gates now stand as follows:
    owned compatibility assets with kernel-removal version `0.5.0`; the generic
    CLI/schema contains no Energy product-name rewrite and fails closed before
    discarding unresolved domain properties.
+   The empty `get_builtin_*`, `get_product_names`, `get_child`,
+   `product_exists`, and `builtin_only` compatibility entry points have been
+   removed from `aether-model`; in-workspace callers now construct an explicit
+   `ProductLibrary` instead of entering a hidden built-in catalog path.
 5. **Complete:** every concrete runtime composition carries a closed v1
    `runtime-manifest.json` with its Aether version, target triple, services,
    exact protocol-affecting Cargo features, derived adapters, live application
@@ -125,25 +129,45 @@ The staged gates now stand as follows:
    missing, unknown, tampered, release-mismatched, target-mismatched, or
    feature-inconsistent metadata fails closed. The installer generator and
    `aether-io` build consume the same feature source, including trimmed builds.
-6. **Local implementation complete; external release gate blocked:** the
-   Kernel CLI builds and installs a closed Pack-only artifact containing no
-   Kernel executable or core crate. Its metadata declares the exact Kernel
-   version, target triple, runtime-manifest digest, and per-file checksums.
+6. **Kernel release complete; downstream Pack publication pending:** the Kernel
+   CLI builds and installs a closed Pack-only artifact
+   containing no Kernel executable or core crate. Its metadata declares the
+   exact Kernel version, target triple, runtime-manifest digest, and per-file
+   checksums.
    Installation re-verifies the Pack against the installed runtime, publishes
    it below the site's `packs/<id>/<version>` directory, and atomically updates
    `global.yaml`; failure preserves the previous active set and rolls back a
-   newly published directory. The independent AetherEMS repository now exists,
-   owns the EMS Console, and runs downstream bootstrap CI against a pinned
-   Kernel commit. What is not yet complete is release evidence: there is no
-   independently published, signed Aether artifact or signed Energy Pack
-   artifact, and the downstream pin does not yet consume those artifacts.
-   Those external facts must not be inferred from the repository split alone.
+   newly published directory. Workspace crates remain source-only behind the
+   supported `aether-edge-sdk` facade and every package declares
+   `publish = false`. The independent AetherEMS repository now exists, owns the
+   EMS Console, and runs downstream bootstrap CI against a pinned Kernel
+   commit. It has not yet consumed the signed release or published independent
+   Pack evidence.
+7. **AetherIot release complete; downstream evidence pending:** the `v0.5.0`
+   tag published the six-process Kernel runtime, standalone CLI, runtime
+   manifests, and versioned source archive. Each payload has a SHA-256 sidecar,
+   and GitHub's `actions/attest@v4` supplies signed build provenance. AetherIot
+   release automation contains no registry token, `cargo publish` command, or
+   AetherEMS Pack artifact. Pack publication belongs to the downstream
+   AetherEMS release.
+8. **Local extraction-readiness proof complete; external extraction blocked:**
+   `scripts/check-extraction-readiness.sh --local-only` deterministically
+   checks the neutral Kernel boundary, safe no-external-database defaults,
+   unignored runtime-manifest binary source, generated runtime metadata, both
+   composition examples, and an isolated Pack-only artifact. The default full
+   mode additionally requires explicit released-version, Kernel/Pack digest,
+   and successful downstream-repository CI evidence. It fails closed when any
+   input is absent, malformed, repository-inconsistent, or unsuccessful. The
+   checker validates supplied evidence identifiers; it does not create or
+   query external releases, repositories, attestations, or CI runs.
 
 The short pointers under `docs/domain/` and
 `libs/aether-model/src/products/README.md` may be removed after supported
-hosted/offline routes and downstream links use Pack-owned locations. Empty
-legacy `get_builtin_*` APIs may be removed once downstream callers compile
-against `ProductLibrary` exclusively.
+hosted/offline routes and downstream links use Pack-owned locations. This
+documentation-pointer condition is not satisfied by the local release workflow
+alone; downstream link evidence must come from the extracted distribution
+repository. The model compatibility entry points themselves are already gone,
+but downstream compilation remains part of the external CI extraction gate.
 
 ## Extraction criteria
 
@@ -154,10 +178,13 @@ only after all of the following are true:
 2. Energy models no longer resolve through `legacy_assets` paths.
 3. Core manifests and source contain no energy product constants or default
    site configuration.
-4. The AetherIot source facade and runtime artifacts are released with
-   compatible version metadata, checksums, and provenance.
-5. AetherEMS CI consumes those released artifacts and passes its pack,
-   configuration, safety, and composition conformance suites.
+4. **Complete for AetherIot `v0.5.0`:** the source facade and runtime artifacts
+   have compatible version metadata, SHA-256 digests, and verifiable build
+   provenance.
+5. AetherEMS CI in the extracted downstream repository consumes those released
+   artifacts and passes its pack, configuration, safety, and composition
+   conformance suites. A repository-qualified successful CI run and commit are
+   still required external evidence.
 6. The complete Aether runtime can install and start with an empty,
    industry-neutral site.
 7. The AetherEMS distribution can install without modifying kernel source.
@@ -178,8 +205,8 @@ only after all of the following are true:
 ### Negative
 
 - The integration workspace temporarily contains both identities.
-- README and release automation must distinguish kernel, runtime, and energy
-  distribution commands precisely.
+- README and release automation must distinguish the Kernel release from the
+  downstream energy distribution precisely.
 - Extraction is deferred until the pack boundary is real rather than merely a
   directory convention.
 
@@ -194,5 +221,22 @@ cargo test -p aether-example-energy-gateway --test pack_artifact_contract
 cargo test -p aether-pack --test asset_index_contract
 ./scripts/check-energy-pack-boundary.sh
 ./scripts/check-safe-default-config.sh
+./scripts/test-release-integrity.sh
+./scripts/test-extraction-readiness.sh
+./scripts/check-extraction-readiness.sh --local-only
 ./scripts/check-architecture.sh
+```
+
+The full extraction gate intentionally fails until real external evidence is
+provided:
+
+```bash
+./scripts/check-extraction-readiness.sh \
+  --released-version 0.5.0 \
+  --kernel-artifact-sha256 <64-hex-sha256> \
+  --energy-pack-artifact-sha256 <different-64-hex-sha256> \
+  --downstream-repository <owner/aether-ems> \
+  --downstream-ci-run-url <https://github.com/owner/aether-ems/actions/runs/id> \
+  --downstream-ci-commit <full-git-commit> \
+  --downstream-ci-conclusion success
 ```

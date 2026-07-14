@@ -54,7 +54,22 @@ domain <- ports <- application <- runtime/interfaces
 
 ## Verification
 
-Run the narrowest affected test first, then:
+Local verification is risk-proportional. Always run the narrowest affected
+check first, and stop once the changed behavior is covered:
+
+- Documentation or ADR-only changes: validate the affected links, numbering,
+  and documentation checks. Do not run Cargo commands.
+- CI, YAML, or shell-only changes: parse or lint the affected files and run
+  the directly related script tests. Do not compile the Rust workspace.
+- A single Rust crate: run formatting plus that crate's focused Clippy and
+  tests. Include direct dependants only when a public contract changed.
+- Cross-crate architecture, dependency direction, composition roots, or live
+  state authority: run the affected package tests and
+  `./scripts/check-architecture.sh`.
+- External-service tests remain opt-in and must be explicitly marked.
+
+Full-workspace verification is owned by pull-request CI. Do not run the full
+workspace suite locally by default. CI is responsible for:
 
 ```bash
 cargo fmt --all -- --check
@@ -63,8 +78,10 @@ cargo test --workspace --lib --bins
 ./scripts/check-architecture.sh
 ```
 
-Tests that require an external service must be explicitly marked and must not
-be part of the default verification path.
+Run that full suite locally only when the user explicitly requests it, when
+cutting a release, or when PR CI is unavailable and the change spans the
+workspace. After pushing, inspect CI once. Do not continuously poll successful
+CI runs; retrieve detailed logs only for failures or when the user asks.
 
 ## Change Discipline
 

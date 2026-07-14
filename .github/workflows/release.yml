@@ -56,6 +56,8 @@ jobs:
       - name: Quick Quality Check
         run: |
           ./scripts/test-release-integrity.sh
+          ./scripts/test-extraction-readiness.sh
+          ./scripts/check-extraction-readiness.sh --local-only
           cargo fmt --all -- --check
           ./scripts/check-architecture.sh
           ./scripts/check-open-source-readiness.sh
@@ -73,6 +75,11 @@ jobs:
     name: Build ${{ matrix.arch }} Installer
     runs-on: ${{ matrix.runner }}
     needs: pre-check
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
@@ -212,10 +219,20 @@ jobs:
           python3 -m json.tool "release/$name" >/dev/null
           (cd release && sha256sum "$name" > "$name.sha256")
 
+      - name: Attest Kernel runtime
+        uses: actions/attest@v4
+        with:
+          subject-path: release/${{ steps.version.outputs.artifact_name }}
+
+      - name: Attest Linux CLI
+        uses: actions/attest@v4
+        with:
+          subject-path: release/aether-linux-${{ matrix.zig_arch }}.tar.gz
+
       - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.arch }}-installer
+          name: ${{ matrix.arch }}-kernel-runtime
           path: |
             release/${{ steps.version.outputs.artifact_name }}
             release/${{ steps.version.outputs.artifact_name }}.sha256
@@ -232,6 +249,7 @@ jobs:
             release/aether-linux-${{ matrix.zig_arch }}.tar.gz
             release/aether-linux-${{ matrix.zig_arch }}.tar.gz.sha256
           retention-days: 7
+          if-no-files-found: error
 
   # ============================================================================
   # Job 3: Build Aether CLI for macOS / Windows
@@ -240,6 +258,11 @@ jobs:
     name: Build Aether (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     needs: pre-check
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
@@ -305,6 +328,11 @@ jobs:
           if (-not (Test-Path "cli-package-verify/NOTICE")) { throw "NOTICE missing from CLI archive" }
           $checksum = (Get-FileHash "aether-${{ matrix.name }}.zip" -Algorithm SHA256).Hash.ToLower() + "  aether-${{ matrix.name }}.zip`n"
           [System.IO.File]::WriteAllText("$PWD/aether-${{ matrix.name }}.zip.sha256", $checksum, [System.Text.Encoding]::ASCII)
+
+      - name: Attest Aether CLI
+        uses: actions/attest@v4
+        with:
+          subject-path: aether-${{ matrix.name }}.${{ matrix.archive }}
 
       - name: Upload Aether CLI
         uses: actions/upload-artifact@v4
