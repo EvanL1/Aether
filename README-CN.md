@@ -81,9 +81,9 @@ cargo run -p aether-example-minimal-gateway
 cargo run -p aether-example-energy-gateway
 ```
 
-发布流程把 domain、ports、application、data-plane、SDK、testkit 与受支持 adapter crate
-视为可独立发布的软件包。在首次完成 `0.5.0` 发布前，这些 workspace 示例就是源码级 SDK
-契约。
+`aether-edge-sdk`（导入名为 `aether_sdk`）是唯一受支持的 Rust 应用门面。Workspace
+实现 crate 仅随源码提供，不能独立发布。下游构建固定到签名源码发行标签对应的精确 commit，
+并通过 SDK 的 `local-runtime` feature 选择本地 adapter。
 
 前者是行业中立的空网关；后者验证默认禁用的 Energy Pack 组合。它们是 SDK 冒烟测试，不是
 受监管的生产运行时。
@@ -116,18 +116,21 @@ domain <- ports <- application <- runtime/interfaces
 ## 项目状态
 
 AetherIot 当前为 beta。版本化 SDK、Pack v1、六服务 Runtime、point/health 一致 SHM epoch、
-嵌入式本地运行、受治理命令、MCP 接口和 OpenAPI 契约检查已经可用。首次独立签名公开发行和
-剩余无 revision 兼容路径的清理仍未完成。精确边界见[架构说明](ARCHITECTURE.md)、
+嵌入式本地运行、受治理命令、MCP 接口和 OpenAPI 契约检查已经可用。签名的 `v0.5.0`
+源码、Runtime 与 CLI 发行已经发布；下游 bootstrap pin 替换和剩余无 revision 兼容路径的
+清理仍未完成。精确边界见[架构说明](ARCHITECTURE.md)、
 [ADR-0007](docs/adr/0007-aether-core-and-ems-distribution.md)与
 [ADR-0012](docs/adr/0012-agent-first-application-surface.md)、
-[ADR-0013](docs/adr/0013-single-sdk-source-release.md)。
+[ADR-0013](docs/adr/0013-single-sdk-source-release.md)、
+[ADR-0014](docs/adr/0014-coordinated-shm-topology-publication.md)与
+[ADR-0015](docs/adr/0015-configuration-authority-and-reconciliation.md)。
 
 Point 与 health 两个 SHM 平面发布同一个已提交物理 epoch，History 与 Uplink 把同一份
 SQLite topology 快照绑定到该 epoch。SQLite 是已投运 topology、协议 mapping、逻辑 route、
 规则与 instance 的期望状态权威，并通过带 revision 的命令自动协调运行时。本地发布门禁会
-按依赖顺序校验公共 crate，在 clean-room consumer 中编译精确归档，检查既有 API 的 SemVer
-兼容性，并分别证明 Kernel、CLI、crate 与 Pack 产物。AetherEMS 物理拆仓及其下游 bootstrap
-CI 已落地，但尚无 tag 建立首次签名 registry/GitHub 发行，也尚未替换 bootstrap Git pin。
+拒绝 registry 发布，确认所有 workspace package 仅随源码提供，并签名 Kernel 源码、Runtime、
+manifest 与 CLI 产物。AetherEMS 物理拆仓及其下游 bootstrap CI 已落地，但尚未使用签名发行
+证据替换 bootstrap Git pin。
 
 ## 文档
 

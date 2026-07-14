@@ -3,7 +3,7 @@
 ## Status
 
 Implemented for all production and test graphs on 2026-07-13. The legacy
-aggregate was removed after the ADR-0012 compatibility matrix and rolling
+aggregate was removed after the ADR-0014 compatibility matrix and rolling
 conformance contracts passed.
 
 ## Context

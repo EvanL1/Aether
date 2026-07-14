@@ -5,6 +5,8 @@ Runtime 已可使用，但部分生产路径仍在从兼容层迁移，AetherEMS
 完成独立发行。项目边界与拆分条件见
 [ADR-0007](./adr/0007-aether-core-and-ems-distribution.md)。
 [ADR-0013](./adr/0013-single-sdk-source-release.md) 规定了单一 SDK façade 与签名源码发行边界。
+[ADR-0014](./adr/0014-coordinated-shm-topology-publication.md) 规定了 point/health SHM 协调发布协议；
+[ADR-0015](./adr/0015-configuration-authority-and-reconciliation.md) 规定了配置权威与运行时协调边界。
 
 ## 开始使用
 

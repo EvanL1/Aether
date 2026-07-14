@@ -14,9 +14,9 @@ authoritative live-state plane.
 
 ### Added
 
-- Public `aether-domain`, `aether-ports`, `aether-application`, `aether-edge-sdk`,
-  `aether-dataplane`, and `aether-testkit` crates with explicit capability
-  boundaries and package-ready metadata.
+- Source-only `aether-domain`, `aether-ports`, `aether-application`,
+  `aether-dataplane`, and adapter crates behind the single supported
+  `aether-edge-sdk` facade.
 - Zero-external-service local adapters and a runnable `minimal-gateway`
   composition.
 - Optional `redis-bridge` and `postgres-history` extensions; neither is in the
@@ -39,10 +39,6 @@ authoritative live-state plane.
   loopback-only upstream validation.
 - A versioned source archive plus checksummed runtime/CLI assets and signed
   GitHub build-provenance attestations in the release pipeline.
-- One dependency-ordered public-crate catalog with exact archive assembly,
-  clean-room consumer compilation, registry-baseline SemVer checks, protected
-  tag publication, digest-verified partial-release resume, and build-provenance
-  attestations.
 
 ### Changed
 

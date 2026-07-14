@@ -1,4 +1,4 @@
-# ADR-0013: Assign configuration authority and reconcile applied projections
+# ADR-0015: Assign configuration authority and reconcile applied projections
 
 ## Status
 

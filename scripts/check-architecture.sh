@@ -265,6 +265,25 @@ if [[ "${AETHER_ARCHITECTURE_CONFIGURATION_MUTATION_ONLY:-0}" == "1" ]]; then
     exit 0
 fi
 
+echo "Checking ADR numbering..."
+duplicate_adr_ids=$(
+    find docs/adr -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]-*.md' -print \
+        | sed 's#.*/##; s/-.*//' \
+        | sort \
+        | uniq -d
+)
+if [[ -n "$duplicate_adr_ids" ]]; then
+    echo "ERROR: duplicate ADR identifiers: $duplicate_adr_ids"
+    exit 1
+fi
+while IFS= read -r adr_path; do
+    adr_id=$(basename "$adr_path" | cut -d- -f1)
+    if ! head -1 "$adr_path" | rg -q "^# ADR-${adr_id}: "; then
+        echo "ERROR: ADR heading does not match its filename: $adr_path"
+        exit 1
+    fi
+done < <(find docs/adr -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]-*.md' -print | sort)
+
 echo "Checking core manifests for infrastructure dependencies..."
 if rg -n "$CORE_MANIFEST_PATTERN" crates --glob 'Cargo.toml'; then
     echo "ERROR: core crates contain a forbidden infrastructure dependency"
@@ -363,8 +382,13 @@ if [[ ! -s distributions/aetherems/runtime-io-features.txt ]]; then
     exit 1
 fi
 if ! rg -q 'distributions/aetherems/runtime-io-features.txt' \
-    .github/workflows/release.yml scripts/check-extraction-readiness.sh; then
-    echo "ERROR: release and extraction gates do not share the AetherEMS runtime feature authority"
+    scripts/check-extraction-readiness.sh; then
+    echo "ERROR: extraction gate does not use the AetherEMS runtime feature authority"
+    exit 1
+fi
+if rg -q 'distributions/aetherems|aetherems-energy-pack' \
+    .github/workflows/release.yml; then
+    echo "ERROR: Kernel release workflow must not publish an AetherEMS composition"
     exit 1
 fi
 

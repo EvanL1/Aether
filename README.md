@@ -87,10 +87,11 @@ cargo run -p aether-example-minimal-gateway
 cargo run -p aether-example-energy-gateway
 ```
 
-The release workflow treats the domain, ports, application, data-plane, SDK,
-testkit, and supported adapter crates as independently publishable packages.
-Until the first `0.5.0` publication is complete, these workspace examples are
-the source-level SDK contract.
+`aether-edge-sdk`, imported as `aether_sdk`, is the only supported Rust
+application facade. Workspace implementation crates are source-only and cannot
+be published independently. Downstream builds pin the exact commit behind a
+signed source release and select local adapters through the SDK's
+`local-runtime` feature.
 
 The first is an empty industry-neutral gateway. The second proves a disabled-by-default Energy Pack
 composition. They are SDK smoke tests, not the supervised production runtime.
@@ -125,22 +126,24 @@ internal ports.
 
 AetherIot is beta software. The versioned SDK, Pack v1, six-service runtime, coherent point/health
 SHM epochs, embedded local operation, governed commands, MCP interface, and OpenAPI contract checks
-are available. The first independent signed public release and removal of the remaining
+are available. The signed `v0.5.0` source/runtime/CLI release is published;
+replacement of the downstream bootstrap pin and removal of the remaining
 revisionless compatibility paths are still pending. See [Architecture](ARCHITECTURE.md),
 [ADR-0007](docs/adr/0007-aether-core-and-ems-distribution.md), and
-[ADR-0012](docs/adr/0012-agent-first-application-surface.md), and
-[ADR-0013](docs/adr/0013-single-sdk-source-release.md) for the exact boundaries.
+[ADR-0012](docs/adr/0012-agent-first-application-surface.md),
+[ADR-0013](docs/adr/0013-single-sdk-source-release.md),
+[ADR-0014](docs/adr/0014-coordinated-shm-topology-publication.md), and
+[ADR-0015](docs/adr/0015-configuration-authority-and-reconciliation.md) for the exact boundaries.
 
 Point and health SHM planes publish one committed physical epoch, while History
 and Uplink bind one SQLite topology snapshot to that exact epoch. SQLite is the
 desired-state authority for commissioned topology, protocol mappings, logical
 routes, rules, and instances, with revisioned commands and automatic runtime
-reconciliation. The local release gate validates a dependency-ordered catalog
-of public crates, compiles exact archives in a clean-room consumer, checks
-established APIs for SemVer compatibility, and keeps Kernel, CLI, crate, and
-Pack artifacts independently attested. The physical AetherEMS split and its
-downstream bootstrap CI exist, but no tag has yet established the first signed
-registry/GitHub release or replaced the bootstrap Git pin.
+reconciliation. The local release gate rejects registry publication, verifies
+that every workspace package is source-only, and signs the Kernel source,
+runtime, manifest, and CLI artifacts. The physical AetherEMS split and its
+downstream bootstrap CI exist, but AetherEMS has not yet replaced its bootstrap
+Git pin with the signed release evidence.
 
 ## Documentation
 

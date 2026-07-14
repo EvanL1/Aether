@@ -3,7 +3,7 @@
 ## Status
 
 Accepted and implemented on 2026-07-10. Compatibility aggregate removal
-completed on 2026-07-13 after ADR-0012 rolling conformance passed.
+completed on 2026-07-13 after ADR-0014 rolling conformance passed.
 
 ## Context
 
@@ -113,7 +113,7 @@ following became true:
    tests and benchmarks migrate to domain batches; retain the fixed-generation
    constructor only while testkit/in-process compositions require it.
 
-Closure evidence is the ADR-0012 four-quadrant compatibility matrix, the
+Closure evidence is the ADR-0014 four-quadrant compatibility matrix, the
 frozen `legacy_v4_reader_accepts_new_io_segment_during_io_first_rolling_upgrade`
 fixture, the inverse epoch-zero rejection contract, typed manifest/acquisition
 writer contracts, and the architecture gate that rejects restoration of the
