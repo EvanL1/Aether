@@ -1,6 +1,6 @@
 # Aether CLI
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 Unified management tool for the [AetherEdge](https://github.com/EvanL1/AetherEdge)
 AI-native, industry-neutral IoT edge kernel. Energy management is an optional
@@ -257,4 +257,5 @@ aether channels list    # Outputs JSON without --json flag
 
 ## License
 
-MIT — see [LICENSE](../../LICENSE)
+MIT OR Apache-2.0, at your option. See [LICENSE-MIT](../../LICENSE-MIT) and
+[LICENSE-APACHE](../../LICENSE-APACHE).

@@ -112,4 +112,5 @@ a change creates a long-lived architectural decision.
 
 Unless you explicitly state otherwise, a contribution intentionally submitted
 for inclusion in Aether is licensed under the repository's
-`MIT OR Apache-2.0` terms, consistent with [LICENSE](LICENSE).
+`MIT OR Apache-2.0` terms, consistent with [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE).

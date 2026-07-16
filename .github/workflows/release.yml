@@ -180,11 +180,13 @@ jobs:
           CLI_PACKAGE_DIR="$(mktemp -d)"
           trap 'rm -rf "$CLI_PACKAGE_DIR"' EXIT
           cp "$AETHER_BIN" "$CLI_PACKAGE_DIR/aether"
-          cp LICENSE "$CLI_PACKAGE_DIR/LICENSE"
+          cp LICENSE-MIT "$CLI_PACKAGE_DIR/LICENSE-MIT"
+          cp LICENSE-APACHE "$CLI_PACKAGE_DIR/LICENSE-APACHE"
           cp NOTICE "$CLI_PACKAGE_DIR/NOTICE"
-          tar czf "$AETHER_TAR" -C "$CLI_PACKAGE_DIR" aether LICENSE NOTICE
+          tar czf "$AETHER_TAR" -C "$CLI_PACKAGE_DIR" aether LICENSE-MIT LICENSE-APACHE NOTICE
           archive_contents=$(tar tzf "$AETHER_TAR")
-          grep -Fxq LICENSE <<< "$archive_contents"
+          grep -Fxq LICENSE-MIT <<< "$archive_contents"
+          grep -Fxq LICENSE-APACHE <<< "$archive_contents"
           grep -Fxq NOTICE <<< "$archive_contents"
           (cd release && sha256sum "$AETHER_TAR_NAME" > "${AETHER_TAR_NAME}.sha256")
           echo "Aether CLI:"
@@ -200,7 +202,8 @@ jobs:
             exit 1
           fi
           installer_contents=$("$ARTIFACT" --list)
-          grep -Eq '(^|/)LICENSE$' <<< "$installer_contents"
+          grep -Eq '(^|/)LICENSE-MIT$' <<< "$installer_contents"
+          grep -Eq '(^|/)LICENSE-APACHE$' <<< "$installer_contents"
           grep -Eq '(^|/)NOTICE$' <<< "$installer_contents"
           (cd release && sha256sum "$ARTIFACT_NAME" > "${ARTIFACT_NAME}.sha256")
           (cd release && sha256sum -c "${ARTIFACT_NAME}.sha256")
@@ -306,11 +309,13 @@ jobs:
           CLI_PACKAGE_DIR="$(mktemp -d)"
           trap 'rm -rf "$CLI_PACKAGE_DIR"' EXIT
           cp "target/${{ matrix.target }}/release/aether" "$CLI_PACKAGE_DIR/aether"
-          cp LICENSE "$CLI_PACKAGE_DIR/LICENSE"
+          cp LICENSE-MIT "$CLI_PACKAGE_DIR/LICENSE-MIT"
+          cp LICENSE-APACHE "$CLI_PACKAGE_DIR/LICENSE-APACHE"
           cp NOTICE "$CLI_PACKAGE_DIR/NOTICE"
-          tar czf "aether-${{ matrix.name }}.tar.gz" -C "$CLI_PACKAGE_DIR" aether LICENSE NOTICE
+          tar czf "aether-${{ matrix.name }}.tar.gz" -C "$CLI_PACKAGE_DIR" aether LICENSE-MIT LICENSE-APACHE NOTICE
           archive_contents=$(tar tzf "aether-${{ matrix.name }}.tar.gz")
-          grep -Fxq LICENSE <<< "$archive_contents"
+          grep -Fxq LICENSE-MIT <<< "$archive_contents"
+          grep -Fxq LICENSE-APACHE <<< "$archive_contents"
           grep -Fxq NOTICE <<< "$archive_contents"
           shasum -a 256 aether-${{ matrix.name }}.tar.gz > aether-${{ matrix.name }}.tar.gz.sha256
 
@@ -320,11 +325,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path "cli-package" | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/aether.exe" "cli-package/aether.exe"
-          Copy-Item "LICENSE" "cli-package/LICENSE"
+          Copy-Item "LICENSE-MIT" "cli-package/LICENSE-MIT"
+          Copy-Item "LICENSE-APACHE" "cli-package/LICENSE-APACHE"
           Copy-Item "NOTICE" "cli-package/NOTICE"
           Compress-Archive -Path "cli-package/*" -DestinationPath "aether-${{ matrix.name }}.zip"
           Expand-Archive -Path "aether-${{ matrix.name }}.zip" -DestinationPath "cli-package-verify"
-          if (-not (Test-Path "cli-package-verify/LICENSE")) { throw "LICENSE missing from CLI archive" }
+          if (-not (Test-Path "cli-package-verify/LICENSE-MIT")) { throw "LICENSE-MIT missing from CLI archive" }
+          if (-not (Test-Path "cli-package-verify/LICENSE-APACHE")) { throw "LICENSE-APACHE missing from CLI archive" }
           if (-not (Test-Path "cli-package-verify/NOTICE")) { throw "NOTICE missing from CLI archive" }
           $checksum = (Get-FileHash "aether-${{ matrix.name }}.zip" -Algorithm SHA256).Hash.ToLower() + "  aether-${{ matrix.name }}.zip`n"
           [System.IO.File]::WriteAllText("$PWD/aether-${{ matrix.name }}.zip.sha256", $checksum, [System.Text.Encoding]::ASCII)
@@ -392,22 +399,26 @@ jobs:
           set -euo pipefail
           for archive in release/aether-linux-*.tar.gz release/aether-darwin-*.tar.gz; do
             archive_contents=$(tar tzf "$archive")
-            grep -Fxq LICENSE <<< "$archive_contents"
+            grep -Fxq LICENSE-MIT <<< "$archive_contents"
+            grep -Fxq LICENSE-APACHE <<< "$archive_contents"
             grep -Fxq NOTICE <<< "$archive_contents"
           done
           zip_contents=$(unzip -Z1 release/aether-windows-x86_64.zip)
-          grep -Fxq LICENSE <<< "$zip_contents"
+          grep -Fxq LICENSE-MIT <<< "$zip_contents"
+          grep -Fxq LICENSE-APACHE <<< "$zip_contents"
           grep -Fxq NOTICE <<< "$zip_contents"
           for installer in release/AetherEdge-*.run; do
             installer_contents=$(bash "$installer" --list)
-            grep -Eq '(^|/)LICENSE$' <<< "$installer_contents"
+            grep -Eq '(^|/)LICENSE-MIT$' <<< "$installer_contents"
+            grep -Eq '(^|/)LICENSE-APACHE$' <<< "$installer_contents"
             grep -Eq '(^|/)NOTICE$' <<< "$installer_contents"
           done
           for manifest in release/aetheriot-runtime-manifest-*.json; do
             python3 -m json.tool "$manifest" >/dev/null
           done
           source_contents=$(tar tzf "release/aetheriot-source-${GITHUB_REF_NAME}.tar.gz")
-          grep -Fxq "AetherEdge-${GITHUB_REF_NAME}/LICENSE" <<< "$source_contents"
+          grep -Fxq "AetherEdge-${GITHUB_REF_NAME}/LICENSE-MIT" <<< "$source_contents"
+          grep -Fxq "AetherEdge-${GITHUB_REF_NAME}/LICENSE-APACHE" <<< "$source_contents"
           grep -Fxq "AetherEdge-${GITHUB_REF_NAME}/NOTICE" <<< "$source_contents"
           (cd release && sha256sum -c ./*.sha256)
 

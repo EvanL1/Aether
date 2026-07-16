@@ -1,7 +1,7 @@
 # AetherEdge
 
 [![Code Check](https://github.com/EvanL1/AetherEdge/actions/workflows/rust-check.yml/badge.svg)](https://github.com/EvanL1/AetherEdge/actions/workflows/rust-check.yml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
 [![Version](https://img.shields.io/badge/version-0.5.0-yellow.svg)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-beta-orange.svg)](CHANGELOG.md)
@@ -217,4 +217,5 @@ Tests requiring an external service are excluded from the default path.
 
 ## License
 
-MIT OR Apache-2.0, at your option. See [LICENSE](LICENSE).
+MIT OR Apache-2.0, at your option. See the [MIT license](LICENSE-MIT) and
+[Apache License 2.0](LICENSE-APACHE).

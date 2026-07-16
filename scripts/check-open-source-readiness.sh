@@ -8,7 +8,6 @@ readonly REQUIRED_FILES=(
     README.md
     README-CN.md
     CHANGELOG.md
-    LICENSE
     LICENSE-MIT
     LICENSE-APACHE
     NOTICE
@@ -63,6 +62,10 @@ fail() {
     echo "ERROR: $*" >&2
     failures=$((failures + 1))
 }
+
+if [[ -e LICENSE ]]; then
+    fail "root LICENSE must not combine multiple standard licenses; keep LICENSE-MIT and LICENSE-APACHE separate"
+fi
 
 if [[ "$COMPOSE_VALIDATION_JWT_SECRET" == "$COMPOSE_VALIDATION_UPLINK_TOKEN" ]]; then
     fail "generated Compose validation credentials must be distinct"
