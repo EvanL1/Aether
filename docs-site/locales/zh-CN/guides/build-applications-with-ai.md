@@ -21,8 +21,9 @@ bunx skills add EvanL1/AetherEdge --skill aether-iot
 这个 Skill 只保存工作方法，并把智能体引导到最新在线文档，避免嵌入过期副本。文档服务提供：
 
 - `/llms.txt`：精简文档索引；
-- `/llms-full.txt`：完整公开文档；
 - 每个页面对应的 Markdown 版本，可以在地址后添加 `.md`，或者发送 `Accept: text/markdown` 请求头获取。
+
+智能体应先读取精简索引，再按当前任务需要获取具体页面，不要一次性载入整个文档站。
 
 当智能体还需要实时运行信息时，连接 `aether mcp`。默认 MCP 接口只读；不要仅仅为了生成应用就启用写权限。
 

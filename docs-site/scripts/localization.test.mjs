@@ -62,4 +62,18 @@ describe('bilingual documentation', () => {
     expect(workflow).not.toContain('rg --pcre2');
     expect(workflow).not.toContain('Published agent documentation must be English-only.');
   });
+
+  it('keeps agent indexes off user homepages and never publishes a full-corpus file', () => {
+    const chineseHome = read('locales/zh-CN/index.md');
+    const englishHome = read('locales/en/index.md');
+    const builder = read('scripts/build-docs.mjs');
+    const workflow = read('../.github/workflows/docs-site-deploy.yml');
+
+    expect(chineseHome).not.toContain('llms.txt');
+    expect(englishHome).not.toContain('llms.txt');
+    expect(builder).not.toContain('renderLlmsFull');
+    expect(builder).not.toContain('llms-full.txt');
+    expect(workflow).toContain('test ! -e dist/llms-full.txt');
+    expect(workflow).toContain('test ! -e dist/en/llms-full.txt');
+  });
 });

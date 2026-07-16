@@ -178,10 +178,6 @@ export function renderLlmsIndex(documents, publicBaseUrl, language = 'en') {
   ].join('\n');
 }
 
-export function renderLlmsFull(documents) {
-  return `${documents.map(({ markdown }) => markdown.trim()).join('\n\n---\n\n')}\n`;
-}
-
 /* v8 ignore start -- CLI filesystem orchestration is exercised by npm run build. */
 async function main() {
   let htmlBuildPresent = true;
@@ -234,24 +230,13 @@ async function main() {
     renderLlmsIndex(localizedDocuments['zh-CN'], publicBaseUrl, 'zh-CN'),
     'utf8'
   );
-  await fs.writeFile(
-    path.join(DIST_DIR, 'llms-full.txt'),
-    renderLlmsFull(localizedDocuments['zh-CN']),
-    'utf8'
-  );
   await fs.mkdir(path.join(DIST_DIR, 'en'), { recursive: true });
   await fs.writeFile(
     path.join(DIST_DIR, 'en', 'llms.txt'),
     renderLlmsIndex(localizedDocuments.en, publicBaseUrl, 'en'),
     'utf8'
   );
-  await fs.writeFile(
-    path.join(DIST_DIR, 'en', 'llms-full.txt'),
-    renderLlmsFull(localizedDocuments.en),
-    'utf8'
-  );
-
-  console.log(`build-docs: added ${documents.length} Markdown twins and 4 localized text indexes`);
+  console.log(`build-docs: added ${documents.length} Markdown twins and 2 localized text indexes`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

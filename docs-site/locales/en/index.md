@@ -41,10 +41,6 @@ Start with the product that owns your task:
 - Select tested versions in [Compatibility](/en/compatibility/version-matrix/).
 - Distinguish shipped and planned work at [Status and Roadmap](/en/roadmap/status/).
 - Install the edge runtime at [Agent Quickstart](/en/agent-quickstart/).
-- Discover every published document through
-  [`/en/llms.txt`](https://docs.aetheriot.workers.dev/en/llms.txt).
-- Fetch the complete corpus through
-  [`/en/llms-full.txt`](https://docs.aetheriot.workers.dev/en/llms-full.txt).
 
 Browsers receive the rendered documentation site. Agents can append `.md` to
 any document URL or send `Accept: text/markdown` to retrieve the Markdown

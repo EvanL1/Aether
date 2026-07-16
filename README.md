@@ -227,8 +227,7 @@ authority is defined by [ADR-0018](docs/adr/0018-pinned-aethercontracts-consumpt
 - [Connect Devices](docs/guides/connect-devices.md)
 - [HTTP API and Swagger](docs/reference/http-api.md)
 - [Deployment](docs/guides/deployment.md)
-- [llms.txt](https://docs.aetheriot.workers.dev/llms.txt) and
-  [llms-full.txt](https://docs.aetheriot.workers.dev/llms-full.txt)
+- [llms.txt](https://docs.aetheriot.workers.dev/llms.txt)
 
 ## Development
 
