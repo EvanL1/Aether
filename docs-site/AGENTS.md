@@ -10,8 +10,10 @@ Production URL: `https://docs.aetheriot.workers.dev`.
 
 - Browser requests receive the Astro + Starlight HTML site.
 - A `.md` suffix or `Accept: text/markdown` receives the matching Markdown.
-- `llms.txt` and `llms-full.txt` are the Chinese agent indexes.
-- `en/llms.txt` and `en/llms-full.txt` are the English agent indexes.
+- `llms.txt` is the Chinese agent index.
+- `en/llms.txt` is the English agent index.
+- Never generate or publish a concatenated full-corpus text file. Agents must
+  discover pages through the compact index and fetch Markdown on demand.
 
 HTML and Markdown are built from the same source set and must never diverge in
 content scope.
@@ -45,7 +47,7 @@ provide explicit roots. CI checks out all sources before synchronization.
 1. Synchronize allowlisted Markdown.
 2. Reject CJK characters in `/en/` and reject untranslated root-locale pages.
 3. Build the Starlight HTML site.
-4. Add Markdown twins and separate Chinese and English agent indexes to `dist/`.
+4. Add Markdown twins and one compact agent index per locale to `dist/`.
 
 ## Worker contract
 

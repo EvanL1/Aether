@@ -32,7 +32,5 @@ AetherIoT 是 AetherEdge、AetherCloud 和 AetherContracts 的共同项目。Aet
 - 在[兼容性矩阵](/compatibility/version-matrix/)中选择经过验证的版本组合。
 - 在[状态与路线图](/roadmap/status/)中区分已实现、实验性和规划中的能力。
 - 按照[智能体快速入门](/agent-quickstart/)安装边缘运行时并连接只读能力。
-- 通过 [`/llms.txt`](https://docs.aetheriot.workers.dev/llms.txt) 查找全部中文文档。
-- 通过 [`/llms-full.txt`](https://docs.aetheriot.workers.dev/llms-full.txt) 获取完整中文语料。
 
 浏览器访问时会得到渲染后的文档页面。智能体可以在任意文档地址后添加 `.md`，或者发送 `Accept: text/markdown` 请求头，直接获取 Markdown 原文。各产品仓库仍是实现细节的权威来源，AetherContracts 仍是共享协议的唯一权威来源。
