@@ -34,9 +34,11 @@ The Skill is deliberately small. It teaches the workflow and routes the agent to
 documentation instead of embedding a stale copy. The documentation service publishes:
 
 - `/llms.txt` — the curated document index;
-- `/llms-full.txt` — the complete public corpus;
 - a Markdown twin for every page by appending `.md` or sending
   `Accept: text/markdown`.
+
+Agents should read the compact index first and fetch only the pages needed for
+the current task rather than loading the entire documentation corpus.
 
 Connect `aether mcp` when the agent also needs live runtime information. The default MCP surface is
 read-only; do not enable writes merely to generate an application.

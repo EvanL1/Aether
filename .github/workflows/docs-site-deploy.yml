@@ -84,11 +84,11 @@ jobs:
           test -f dist/index.html
           test -f dist/index.md
           test -f dist/llms.txt
-          test -f dist/llms-full.txt
+          test ! -e dist/llms-full.txt
           test -f dist/en/index.html
           test -f dist/en.md
           test -f dist/en/llms.txt
-          test -f dist/en/llms-full.txt
+          test ! -e dist/en/llms-full.txt
           node scripts/check-language.mjs dist
 
       - name: Normalize Cloudflare API token

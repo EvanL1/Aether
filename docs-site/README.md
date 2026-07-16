@@ -9,8 +9,12 @@ The dual-mode unified documentation service for AetherIoT, covering
 - Browsers receive a searchable Astro + Starlight site.
 - Agents can append `.md` or request `Accept: text/markdown`.
 - Simplified Chinese is served from `/`; English is served from `/en/`.
-- `/llms.txt` and `/llms-full.txt` provide the Chinese agent indexes.
-- `/en/llms.txt` and `/en/llms-full.txt` provide the English agent indexes.
+- `/llms.txt` provides the Chinese agent index.
+- `/en/llms.txt` provides the English agent index.
+
+The service deliberately does not publish a concatenated full-corpus file.
+Agents use the compact index and fetch only the Markdown pages needed for the
+current task.
 
 The English publication mirrors allowlisted product documentation from all
 three repositories. The complete Chinese publication is maintained under

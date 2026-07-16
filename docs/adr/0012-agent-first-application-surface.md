@@ -60,7 +60,8 @@ a security or data-authority boundary in an IoT system with physical side effect
 ## Follow-up acceptance criteria
 
 - The public docs publish the generated-application method through HTML, Markdown twins,
-  `llms.txt`, and `llms-full.txt`.
+  and the compact `llms.txt` index. Agents fetch individual Markdown pages on demand;
+  the site does not publish a concatenated full-corpus file.
 - The `aether-iot` Skill validates under the Agent Skills format and can be installed from the
   repository.
 - No AetherIot release artifact contains a required browser application or frontend service.

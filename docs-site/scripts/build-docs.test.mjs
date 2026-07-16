@@ -5,7 +5,6 @@ import {
   findOutputCollisions,
   partitionDocumentsByLocale,
   renderDocument,
-  renderLlmsFull,
   renderLlmsIndex,
   slugToOutputRelPath,
 } from './build-docs.mjs';
@@ -142,20 +141,6 @@ describe('partitionDocumentsByLocale', () => {
       { slug: '', publicSlug: 'en' },
       { slug: 'aethercloud/index', publicSlug: 'en/aethercloud/index' },
     ]);
-  });
-});
-
-describe('renderLlmsFull', () => {
-  it('combines every rendered Markdown document without HTML', () => {
-    const documents = [
-      { title: 'Aether', markdown: '# Aether\n\nOverview.\n' },
-      { title: 'Quickstart', markdown: '# Quickstart\n\nInstall.\n' },
-    ];
-
-    const output = renderLlmsFull(documents);
-    expect(output).toContain('# Aether');
-    expect(output).toContain('# Quickstart');
-    expect(output).not.toContain('<html');
   });
 });
 
