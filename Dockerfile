@@ -17,8 +17,9 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
-# Preserve the repository license in every published runtime image.
-COPY LICENSE /usr/share/licenses/aetherems/LICENSE
+# Preserve both repository license options in every published runtime image.
+COPY LICENSE-MIT /usr/share/licenses/aetherems/LICENSE-MIT
+COPY LICENSE-APACHE /usr/share/licenses/aetherems/LICENSE-APACHE
 COPY NOTICE /usr/share/licenses/aetherems/NOTICE
 LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
 

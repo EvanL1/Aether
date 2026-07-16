@@ -1,7 +1,7 @@
 # AetherEdge
 
 [![代码检查](https://github.com/EvanL1/AetherEdge/actions/workflows/rust-check.yml/badge.svg)](https://github.com/EvanL1/AetherEdge/actions/workflows/rust-check.yml)
-[![许可证](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
+[![许可证](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#许可证)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
 [![版本](https://img.shields.io/badge/version-0.5.0-yellow.svg)](CHANGELOG.md)
 [![状态](https://img.shields.io/badge/status-beta-orange.svg)](CHANGELOG.md)
@@ -192,4 +192,5 @@ cargo test --workspace --lib --bins
 
 ## 许可证
 
-可任选 MIT 或 Apache-2.0。详见 [LICENSE](LICENSE)。
+可任选 MIT 或 Apache-2.0。详见 [MIT 许可证](LICENSE-MIT)和
+[Apache 2.0 许可证](LICENSE-APACHE)。

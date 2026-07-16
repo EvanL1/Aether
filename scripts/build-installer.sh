@@ -44,11 +44,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build/installer"
 OUTPUT_DIR="$ROOT_DIR/release"
-LICENSE_FILE="$ROOT_DIR/LICENSE"
+LICENSE_MIT_FILE="$ROOT_DIR/LICENSE-MIT"
+LICENSE_APACHE_FILE="$ROOT_DIR/LICENSE-APACHE"
 NOTICE_FILE="$ROOT_DIR/NOTICE"
 
-if [[ ! -f "$LICENSE_FILE" || ! -f "$NOTICE_FILE" ]]; then
-    echo -e "${RED}Error: root LICENSE or NOTICE file is missing${NC}"
+if [[ ! -f "$LICENSE_MIT_FILE" || ! -f "$LICENSE_APACHE_FILE" || ! -f "$NOTICE_FILE" ]]; then
+    echo -e "${RED}Error: root license or NOTICE file is missing${NC}"
     exit 1
 fi
 
@@ -59,8 +60,12 @@ verify_installer_license() {
         echo -e "${RED}Error: unable to list installer $installer_path${NC}"
         return 1
     fi
-    if ! grep -Eq '(^|/)LICENSE$' <<< "$installer_contents"; then
-        echo -e "${RED}Error: LICENSE missing from installer $installer_path${NC}"
+    if ! grep -Eq '(^|/)LICENSE-MIT$' <<< "$installer_contents"; then
+        echo -e "${RED}Error: LICENSE-MIT missing from installer $installer_path${NC}"
+        return 1
+    fi
+    if ! grep -Eq '(^|/)LICENSE-APACHE$' <<< "$installer_contents"; then
+        echo -e "${RED}Error: LICENSE-APACHE missing from installer $installer_path${NC}"
         return 1
     fi
     if ! grep -Eq '(^|/)NOTICE$' <<< "$installer_contents"; then
@@ -652,7 +657,8 @@ if csv_contains "$BUILD_IMAGES" "aetherems:latest"; then
         fi
         cp scripts/install-baremetal.sh "$BM_PKG_DIR/install.sh"
         cp libs/aether-script-host/main.py "$BM_PKG_DIR/script-host/main.py"
-        cp "$LICENSE_FILE" "$BM_PKG_DIR/LICENSE"
+        cp "$LICENSE_MIT_FILE" "$BM_PKG_DIR/LICENSE-MIT"
+        cp "$LICENSE_APACHE_FILE" "$BM_PKG_DIR/LICENSE-APACHE"
         cp "$NOTICE_FILE" "$BM_PKG_DIR/NOTICE"
         find config.template -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.csv" -o -name "*.json" \) | while read -r f; do
             mkdir -p "$BM_PKG_DIR/$(dirname "$f")"
@@ -815,7 +821,8 @@ echo -e "${BLUE}[5/5] Creating self-extracting package...${NC}"
 
 TEMP_PKG_DIR="/tmp/AetherEdge-temp-$$"
 mkdir -p "$TEMP_PKG_DIR"
-cp "$LICENSE_FILE" "$TEMP_PKG_DIR/LICENSE"
+cp "$LICENSE_MIT_FILE" "$TEMP_PKG_DIR/LICENSE-MIT"
+cp "$LICENSE_APACHE_FILE" "$TEMP_PKG_DIR/LICENSE-APACHE"
 cp "$NOTICE_FILE" "$TEMP_PKG_DIR/NOTICE"
 
 [[ -d "$BUILD_DIR/docker" ]] && copy_docker_images "$BUILD_DIR/docker" "$TEMP_PKG_DIR/docker"
