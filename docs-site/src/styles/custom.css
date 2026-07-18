@@ -450,7 +450,8 @@ mobile-starlight-toc .dropdown {
 
 .content-panel .hero {
   position: relative;
-  min-height: 31rem;
+  min-height: 0;
+  padding-block: clamp(3.5rem, 8vh, 5rem);
   padding-inline: var(--aether-page-gutter);
   align-items: center;
   overflow: hidden;
@@ -497,11 +498,13 @@ mobile-starlight-toc .dropdown {
 .content-panel .hero .stack {
   position: relative;
   z-index: 1;
+  width: 100%;
+  max-width: 48rem;
 }
 
 .content-panel .hero h1 {
   color: var(--sl-color-white);
-  font-size: clamp(2.875rem, 5vw, 5.875rem);
+  font-size: clamp(2.875rem, 4.25vw, 4.75rem);
   font-weight: 560;
   letter-spacing: -0.075em;
   line-height: 0.92;
@@ -666,7 +669,7 @@ mobile-starlight-toc .dropdown {
   }
 
   .content-panel .hero {
-    min-height: 26rem;
+    padding-block: 3rem;
   }
 
   .content-panel .hero h1 {
@@ -680,7 +683,7 @@ mobile-starlight-toc .dropdown {
 
 @media (max-width: 30rem) {
   .content-panel .hero {
-    min-height: 23rem;
+    padding-block: 2.5rem;
     padding-inline: 1.25rem;
   }
 

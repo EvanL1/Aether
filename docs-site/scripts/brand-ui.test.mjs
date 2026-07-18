@@ -102,17 +102,20 @@ describe("AetherIoT documentation brand system", () => {
     expect(favicon).toContain('stroke="#b8ff62"');
   });
 
-  it("keeps the documentation hero on the website type scale", () => {
+  it("keeps the documentation hero proportional on wide screens", () => {
     const styles = read("src/styles/custom.css");
 
     expect(styles).toContain(
       "--aether-page-gutter: clamp(1rem, 2.5vw, 3rem)",
     );
     expect(styles).toMatch(
-      /\.content-panel \.hero\s*{[^}]*padding-inline:\s*var\(--aether-page-gutter\)/,
+      /\.content-panel \.hero\s*{[^}]*min-height:\s*0;[^}]*padding-block:\s*clamp\(3\.5rem,\s*8vh,\s*5rem\);[^}]*padding-inline:\s*var\(--aether-page-gutter\)/,
     );
     expect(styles).toMatch(
-      /\.content-panel \.hero h1\s*{[\s\S]*font-size:\s*clamp\(2\.875rem,\s*5vw,\s*5\.875rem\)/,
+      /\.content-panel \.hero \.stack\s*{[^}]*max-width:\s*48rem/,
+    );
+    expect(styles).toMatch(
+      /\.content-panel \.hero h1\s*{[\s\S]*font-size:\s*clamp\(2\.875rem,\s*4\.25vw,\s*4\.75rem\)/,
     );
     expect(styles).toMatch(
       /\.content-panel \.hero \.tagline\s*{[\s\S]*font-size:\s*clamp\(1\.0625rem,\s*1\.7vw,\s*1\.3125rem\)/,
