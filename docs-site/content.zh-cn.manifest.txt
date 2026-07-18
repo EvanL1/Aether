@@ -90,4 +90,4 @@ locales/zh-CN/reference/http-api.md
 locales/zh-CN/reference/mcp-tools.md
 locales/zh-CN/roadmap/status.md
 locales/zh-CN/security/dependency-exceptions.md
-locales/zh-CN/tutorials/edge-contracts-cloud.md
+locales/zh-CN/guides/edge-contracts-cloud.md

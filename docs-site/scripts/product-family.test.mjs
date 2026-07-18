@@ -74,6 +74,26 @@ describe('AetherIoT product-family documentation', () => {
     expect(config).toContain("directory: 'aethercontracts/packages'");
   });
 
+  it('keeps the cross-product integration guide inside Guides without a Tutorials section', () => {
+    const config = read('docs-site/astro.config.mjs');
+    const edgeManifest = read('docs-site/content.manifest.txt');
+    const chineseManifest = read('docs-site/content.zh-cn.manifest.txt');
+
+    expect(config).not.toContain("label: 'Tutorials'");
+    expect(config).toContain(
+      "'/tutorials/edge-contracts-cloud': '/guides/edge-contracts-cloud'"
+    );
+    expect(config).toContain(
+      "'/en/tutorials/edge-contracts-cloud': '/en/guides/edge-contracts-cloud'"
+    );
+    expect(edgeManifest).toContain('docs/guides/*');
+    expect(edgeManifest).not.toContain('docs/tutorials/*');
+    expect(chineseManifest).toContain('locales/zh-CN/guides/edge-contracts-cloud.md');
+    expect(chineseManifest).not.toContain(
+      'locales/zh-CN/tutorials/edge-contracts-cloud.md'
+    );
+  });
+
   it('makes pagination direction labels primary and keeps page names compact', () => {
     const config = read('docs-site/astro.config.mjs');
     const styles = read('docs-site/src/styles/custom.css');

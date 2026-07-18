@@ -1,5 +1,13 @@
 const MARKDOWN_CONTENT_TYPE = 'text/markdown; charset=utf-8';
 const TEXT_CONTENT_TYPE = 'text/plain; charset=utf-8';
+const LEGACY_GUIDE_PATHS = new Map([
+  ['/tutorials/edge-contracts-cloud', '/guides/edge-contracts-cloud/'],
+  ['/tutorials/edge-contracts-cloud/', '/guides/edge-contracts-cloud/'],
+  ['/tutorials/edge-contracts-cloud.md', '/guides/edge-contracts-cloud.md'],
+  ['/en/tutorials/edge-contracts-cloud', '/en/guides/edge-contracts-cloud/'],
+  ['/en/tutorials/edge-contracts-cloud/', '/en/guides/edge-contracts-cloud/'],
+  ['/en/tutorials/edge-contracts-cloud.md', '/en/guides/edge-contracts-cloud.md'],
+]);
 
 function successHeaders(sourceHeaders, contentType) {
   const headers = new Headers(sourceHeaders);
@@ -24,6 +32,15 @@ function markdownAssetPath(pathname) {
   return `${trimmedPath}.md`;
 }
 
+function legacyGuideRedirect(url) {
+  const pathname = LEGACY_GUIDE_PATHS.get(url.pathname);
+  if (!pathname) return null;
+
+  const redirectUrl = new URL(url);
+  redirectUrl.pathname = pathname;
+  return Response.redirect(redirectUrl, 308);
+}
+
 async function fetchAsset(request, env, assetPath) {
   const sourceUrl = new URL(request.url);
   const assetUrl = assetPath ? new URL(assetPath, sourceUrl) : sourceUrl;
@@ -39,6 +56,9 @@ export default {
     }
 
     const url = new URL(request.url);
+    const redirect = legacyGuideRedirect(url);
+    if (redirect) return redirect;
+
     const accept = request.headers.get('Accept') || '';
     const wantsMarkdown = url.pathname.endsWith('.md') || accept.includes('text/markdown');
 

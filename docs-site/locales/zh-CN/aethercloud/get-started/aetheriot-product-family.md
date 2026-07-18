@@ -30,7 +30,7 @@ AetherEMS            industry solution built on the platform
 
 已发布的标签、证据、出处记录和摘要固定AetherContracts 版本是不可变的。 alpha.3 版本和导入的消费者关闭可能会保留历史上的 AetherIot 名称。仓库重命名不会更改其一致性状态。
 
-常见文档入口点是 [docs.aetheriot.workers.dev](https://docs.aetheriot.workers.dev/)。其主要部分包括概述、AetherEdge、AetherCloud、AetherContracts、教程、兼容性和路线图。产品仓库对于实施细节仍然具有权威性。
+统一文档入口是 [docs.aetheriot.workers.dev](https://docs.aetheriot.workers.dev/)。主要栏目包括概览、AetherEdge、AetherCloud、AetherContracts、兼容性和路线图；具体操作内容分别归入各产品的指南。产品仓库仍是实现细节的权威来源。
 
 仓库地址变化和保持稳定的软件标识，请参阅公开的
 [AetherIot 到 AetherEdge 迁移指南](/migration/aetheriot-to-aetheredge)。

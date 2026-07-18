@@ -16,6 +16,33 @@ afterEach(() => {
 });
 
 describe('dual-mode documentation service', () => {
+  it.each([
+    [
+      '/tutorials/edge-contracts-cloud',
+      'https://example.com/guides/edge-contracts-cloud/',
+    ],
+    [
+      '/tutorials/edge-contracts-cloud/',
+      'https://example.com/guides/edge-contracts-cloud/',
+    ],
+    [
+      '/tutorials/edge-contracts-cloud.md',
+      'https://example.com/guides/edge-contracts-cloud.md',
+    ],
+    [
+      '/en/tutorials/edge-contracts-cloud?source=old',
+      'https://example.com/en/guides/edge-contracts-cloud/?source=old',
+    ],
+  ])('permanently redirects the legacy guide route %s', async (path, location) => {
+    const response = await run(path, {
+      headers: { Accept: 'text/markdown' },
+      redirect: 'manual',
+    });
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get('Location')).toBe(location);
+  });
+
   it('serves HTML to a normal browser request', async () => {
     const response = await run('/agent-quickstart/');
 

@@ -58,7 +58,7 @@ ACK, complete production codecs, and a production CloudLink cutover release.
 ## Platform documentation
 
 **Implemented in this migration:** shared product overview, unified navigation,
-deployment topologies, user journeys, end-to-end alpha tutorial, compatibility
+deployment topologies, user journeys, end-to-end integration guide, compatibility
 matrix, status page, and AetherIot to AetherEdge migration guide.
 
 **Planned:** automated

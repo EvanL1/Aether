@@ -43,4 +43,4 @@ AetherEMS            构建在平台上的能源管理解决方案
 
 本站是共同入口。每个产品仓库仍是自身实现细节的权威来源，AetherContracts 仍是共享协议行为的唯一权威来源。统一文档只负责组织和链接这些来源，不复制出第二套规范权威。
 
-接下来可以阅读 [AI 原生平台](/overview/ai-native-platform/)、[部署拓扑](/overview/deployment-topologies/)、[典型用户旅程](/overview/user-journeys/)或[边缘、契约与云端联动教程](/tutorials/edge-contracts-cloud/)。
+接下来可以阅读 [AI 原生平台](/overview/ai-native-platform/)、[部署拓扑](/overview/deployment-topologies/)、[典型用户旅程](/overview/user-journeys/)或[边缘、契约与云端联动指南](/guides/edge-contracts-cloud/)。

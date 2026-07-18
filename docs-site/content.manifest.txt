@@ -10,7 +10,6 @@ docs/overview/*
 docs/aetheredge/*
 docs/aethercloud/*
 docs/aethercontracts/*
-docs/tutorials/*
 docs/compatibility/*
 docs/roadmap/*
 docs/migration/*

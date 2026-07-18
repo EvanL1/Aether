@@ -38,7 +38,7 @@ updated: 2026-07-16
 
 1. 在[兼容性矩阵](/compatibility/version-matrix/)中选择经过验证的产品版本组合。
 2. 分别验证 Edge 和 Cloud 中通过摘要锁定的 AetherContracts 消费者锁。
-3. 按照[边缘、契约与云端联动教程](/tutorials/edge-contracts-cloud/)完成开发验证。
+3. 按照[边缘、契约与云端联动指南](/guides/edge-contracts-cloud/)完成开发验证。
 4. 在所有公开发行门槛通过前，CloudLink 继续保持实验性，并保留旧版兼容路径。
 
 ## 实现独立客户端或运行时

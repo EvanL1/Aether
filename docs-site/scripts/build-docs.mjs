@@ -121,7 +121,6 @@ export function renderLlmsIndex(documents, publicBaseUrl, language = 'en') {
       'AetherContracts',
       ({ slug }) => slug === 'aethercontracts' || slug.startsWith('aethercontracts/'),
     ],
-    [chinese ? '教程' : 'Tutorials', ({ slug }) => slug.startsWith('tutorials/')],
     [chinese ? '兼容性' : 'Compatibility', ({ slug }) => slug.startsWith('compatibility/')],
     [chinese ? '路线图' : 'Roadmap', ({ slug }) => slug.startsWith('roadmap/')],
     [chinese ? '迁移' : 'Migration', ({ slug }) => slug.startsWith('migration/')],

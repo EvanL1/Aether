@@ -71,7 +71,7 @@ describe('renderLlmsIndex', () => {
         description: 'Share public contracts.',
       },
       {
-        slug: 'tutorials/edge-contracts-cloud',
+        slug: 'guides/edge-contracts-cloud',
         title: 'Edge to Cloud',
         description: 'Follow an end-to-end path.',
       },
@@ -98,7 +98,10 @@ describe('renderLlmsIndex', () => {
     expect(output).toContain('## AetherEdge');
     expect(output).toContain('## AetherCloud');
     expect(output).toContain('## AetherContracts');
-    expect(output).toContain('## Tutorials');
+    expect(output).not.toContain('## Tutorials');
+    expect(output).toContain(
+      '- [Edge to Cloud](https://docs.aetheriot.workers.dev/guides/edge-contracts-cloud)'
+    );
     expect(output).toContain('## Compatibility');
     expect(output).toContain('## Roadmap');
     expect(output).not.toContain('## Start Here');

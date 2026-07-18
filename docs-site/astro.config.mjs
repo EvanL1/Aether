@@ -5,6 +5,10 @@ import starlightLinksValidator from 'starlight-links-validator';
 
 export default defineConfig({
   site: 'https://docs.aetheriot.workers.dev',
+  redirects: {
+    '/tutorials/edge-contracts-cloud': '/guides/edge-contracts-cloud',
+    '/en/tutorials/edge-contracts-cloud': '/en/guides/edge-contracts-cloud',
+  },
   integrations: [
     starlight({
       title: 'AetherIoT',
@@ -165,11 +169,6 @@ export default defineConfig({
               slug: 'aethercontracts/migration',
             },
           ],
-        },
-        {
-          label: 'Tutorials',
-          translations: { 'zh-CN': '教程' },
-          items: [{ autogenerate: { directory: 'tutorials' } }],
         },
         {
           label: 'Compatibility',

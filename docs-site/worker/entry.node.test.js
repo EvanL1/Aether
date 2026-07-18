@@ -39,6 +39,33 @@ function run(path, init, options) {
 }
 
 describe('dual-mode Worker in the Node unit-test runtime', () => {
+  it.each([
+    [
+      '/tutorials/edge-contracts-cloud',
+      'https://example.com/guides/edge-contracts-cloud/',
+    ],
+    [
+      '/tutorials/edge-contracts-cloud/',
+      'https://example.com/guides/edge-contracts-cloud/',
+    ],
+    [
+      '/tutorials/edge-contracts-cloud.md',
+      'https://example.com/guides/edge-contracts-cloud.md',
+    ],
+    [
+      '/en/tutorials/edge-contracts-cloud?source=old',
+      'https://example.com/en/guides/edge-contracts-cloud/?source=old',
+    ],
+  ])('permanently redirects the legacy guide route %s', async (path, location) => {
+    const response = await run(path, {
+      headers: { Accept: 'text/markdown' },
+      redirect: 'manual',
+    });
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get('Location')).toBe(location);
+  });
+
   it('serves HTML by default and Markdown on explicit request', async () => {
     const html = await run('/agent-quickstart/');
     const markdown = await run('/agent-quickstart/', {
