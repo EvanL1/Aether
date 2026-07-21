@@ -180,22 +180,11 @@ Only `aether-api` is a remote application boundary. The other process APIs stay 
 Generated clients must use published application capabilities and must not expose or proxy those
 internal ports.
 
-## Development
+## Contributing
 
-Run focused checks for the crates or scripts you changed. The complete
-workspace matrix is enforced by pull-request CI; `quick-check.sh` remains an
-optional local release gate rather than the default edit loop.
-
-```bash
-cargo fmt --all -- --check
-cargo clippy -p <affected-package> --all-targets --all-features -- -D warnings
-cargo test -p <affected-package>
-
-# Optional full local release gate
-./scripts/quick-check.sh
-```
-
-Tests requiring an external service are excluded from the default path.
+Development setup and verification live in
+[CONTRIBUTING.md](CONTRIBUTING.md). Repository rules for agents and
+contributors live in [AGENTS.md](AGENTS.md).
 
 ## License
 

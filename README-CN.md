@@ -161,17 +161,9 @@ domain <- ports <- application <- runtime/interfaces
 只有 `aether-api` 是远程应用边界，其他进程 API 必须保留在 loopback。生成式客户端只能使用
 公开 application capability，不能暴露或代理这些内部端口。
 
-## 开发验证
+## 参与开发
 
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --lib --bins
-./scripts/check-openapi-contracts.sh
-./scripts/check-architecture.sh
-```
-
-依赖外部服务的测试不属于默认验证路径。
+开发环境与验证流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。面向智能体与贡献者的仓库规则见 [AGENTS.md](AGENTS.md)。
 
 ## 许可证
 
