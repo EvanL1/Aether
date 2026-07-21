@@ -37,6 +37,9 @@ skills/       the repository-owned Agent Skill
 firmware/     separately targeted embedded workspace
 ```
 
+The unified documentation site source and deployment live in
+[`EvanL1/AetherDocs`](https://github.com/EvanL1/AetherDocs).
+
 Historical migration plans under `docs/plans/` and `docs/superpowers/` are
 evidence of earlier decisions, not current architecture instructions. Current
 authority is this file, accepted ADRs, the runtime manifest, OpenAPI, and the
