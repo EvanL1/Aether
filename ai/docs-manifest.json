@@ -2395,7 +2395,7 @@
       "implementation_status": "partial",
       "production_readiness": "experimental",
       "context_sensitivity": "public",
-      "updated": "2026-07-16",
+      "updated": "2026-07-22",
       "priority": "core",
       "media_type": "text/markdown",
       "capability_refs": [],
@@ -2504,7 +2504,7 @@
       "implementation_status": "partial",
       "production_readiness": "experimental",
       "context_sensitivity": "public",
-      "updated": "2026-07-16",
+      "updated": "2026-07-22",
       "priority": "core",
       "media_type": "text/markdown",
       "capability_refs": [

@@ -100,7 +100,7 @@ class ChannelAdapter:
 |------|----------|------------|
 | **核心组件** | Gateway（单进程） | ChannelManager |
 | **连接管理** | 管理所有 IM channel 连接 | 管理所有设备通道连接 |
-| **控制接口** | WebSocket (18789) | HTTP API (6001) |
+| **控制接口** | WebSocket (18789) | HTTP API（应用经 6005 网关；io 内部端口 6001） |
 | **会话路由** | 私聊/群聊/工作号隔离 | C2M/M2C/C2C 路由 |
 | **状态缓存** | 连接状态 + 会话上下文 | `ArcSwap<ConnectionState>` + `RoutingCache` |
 
