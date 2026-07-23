@@ -126,18 +126,35 @@ impl AetherMcp {
     }
 
     /// Constructs MCP from the single shared `<config>/global.yaml` Pack entry.
+    /// A host with no local installation at all degrades to the generic
+    /// kernel surface instead of refusing to start: every tool talks to the
+    /// API gateway at call time, so server startup must not require an
+    /// on-host runtime installation. A present but broken installation still
+    /// fails closed — configured Packs must never be silently dropped. The
+    /// warning goes to stderr, which stdio MCP clients do not parse.
     pub(crate) fn from_active_pack_config(
         urls: &BaseUrls,
         allow_write: bool,
         config_directory: &Path,
     ) -> anyhow::Result<Self> {
+        if !config_directory.join("global.yaml").exists() {
+            eprintln!(
+                "aether mcp: no local configuration under {}; serving the generic kernel surface",
+                config_directory.display()
+            );
+            return Self::with_active_packs(urls, allow_write, &ActivePackSet::empty());
+        }
+        let active_packs = Self::load_local_pack_context(config_directory)?;
+        Self::with_active_packs(urls, allow_write, &active_packs)
+    }
+
+    fn load_local_pack_context(config_directory: &Path) -> anyhow::Result<ActivePackSet> {
         let runtime_manifest = aether_runtime_catalog::load_runtime_manifest_for_current_process(
             config_directory,
             env!("CARGO_PKG_VERSION"),
         )?;
         let pack_runtime = runtime_manifest.pack_runtime()?;
-        let active_packs = load_active_packs(config_directory, &pack_runtime)?;
-        Self::with_active_packs(urls, allow_write, &active_packs)
+        Ok(load_active_packs(config_directory, &pack_runtime)?)
     }
 
     fn with_active_packs(
@@ -1217,6 +1234,30 @@ mod tests {
             uplink: base.to_string(),
             history: base.to_string(),
         }
+    }
+
+    #[test]
+    fn missing_local_installation_degrades_to_the_generic_surface() {
+        let server = AetherMcp::from_active_pack_config(
+            &test_urls("http://localhost:0"),
+            false,
+            std::path::Path::new("/nonexistent-aether-config-directory"),
+        )
+        .expect("mcp must start without an on-host runtime installation");
+        assert!(
+            server
+                .doc_resources
+                .iter()
+                .any(|resource| resource.uri.starts_with("aether://docs/")),
+            "kernel documentation resources must still be served"
+        );
+        assert!(
+            server
+                .doc_resources
+                .iter()
+                .all(|resource| !resource.uri.starts_with("aether://packs/")),
+            "no Pack resources may appear without a local Pack context"
+        );
     }
 
     #[test]
