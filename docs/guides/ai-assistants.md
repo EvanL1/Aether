@@ -42,7 +42,7 @@ The production MCP catalog has 45 tools in two tiers:
 
 Each tool wraps one CLI client call against the authenticated API gateway
 (`aether-api:6005`) — the same remote application boundary every other client
-uses (ADR-0021). Set `AETHER_ACCESS_TOKEN` for the session: the gateway
+uses. Set `AETHER_ACCESS_TOKEN` for the session: the gateway
 authenticates reads as well as writes. A Viewer token is enough for the
 read-only tier; obtain one from `POST /api/v1/auth/login`. Results come back
 as structured content; a failed or unreachable service comes back as readable
@@ -87,7 +87,7 @@ claude mcp add aether -- aether mcp --allow-write
 
 The MCP server does not have to run on the edge device. Every tool talks to
 the single API gateway (`aether-api:6005`), so one address configures
-everything (ADR-0021). Resolution order at server startup:
+everything. Resolution order at server startup:
 
 1. **`--host <hostname>`** targets the gateway on that host with the default
    port: `aether mcp --host 192.168.1.50` resolves to

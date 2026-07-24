@@ -160,7 +160,7 @@ AetherEMS are deployed independently and enter through `aether-api`.
 ## Get an operator token
 
 The CLI data plane and MCP speak only to the authenticated API gateway on
-port 6005 (ADR-0021), so every `aether` data command needs an access token.
+port 6005, so every `aether` data command needs an access token.
 Log in as the bootstrap admin and export the token for the shell session —
 the login API expects the hex MD5 digest of the password, not the plaintext:
 

@@ -170,7 +170,7 @@ gates):
 | `HOST_GID` | `1000` | Group id for container processes; pairs with `HOST_UID` |
 | `DIALOUT_GID` | `20` | Dialout group id for serial-port access (Linux only) |
 | `INFLUXDB_URL`, `INFLUXDB_ORG`, `INFLUXDB_BUCKET`, `INFLUXDB_TOKEN`, `INFLUXDB_PASSWORD` | unset | Optional InfluxDB history adapter only; unused by the default runtime |
-| `AETHER_API_URL` | `http://localhost:6005` | API gateway base URL for the `aether` CLI data plane and MCP; the only remote application boundary (ADR-0021) |
+| `AETHER_API_URL` | `http://localhost:6005` | API gateway base URL for the `aether` CLI data plane and MCP; the only remote application boundary |
 | `AETHER_IO_URL` | `http://127.0.0.1:6001` | Loopback io base URL used by the automation service's io calls; not read by the CLI |
 | `AETHER_SHM_PATH` | platform-selected tmpfs path | Canonical authoritative point-state segment shared by io and read-only consumers |
 | `AETHER_CHANNEL_HEALTH_SHM_PATH` | sibling `*-health` path | Separate authoritative channel-connectivity segment; normally derived from `AETHER_SHM_PATH` |
@@ -178,7 +178,7 @@ gates):
 | `SHM_IDENTITY_CHECK_INTERVAL_MS` | `250` | Fallback interval for checking whether the canonical SHM inode was replaced; generation fencing handles normal swaps immediately |
 | `SHM_TOPOLOGY_REFRESH_INTERVAL_MS` | `1000` (minimum `100`) | Interval used by API, alarm, and automation to reload one SQLite topology snapshot and atomically publish a validated point/health/routing generation |
 | `JWT_SECRET_KEY` | unset (required) | Shared 32-byte-or-longer access-JWT signing/verification secret for aether-api plus governed io, automation, and alarm operations; installers generate it and keep it outside configuration assets |
-| `AETHER_ACCESS_TOKEN` | unset | Signed access JWT the `aether` CLI data plane and MCP attach to every gateway request (ADR-0021). A Viewer token covers queries; governed writes — channel commissioning/lifecycle, device commands, action-routing changes, automation/alarm policy, and MCP's 22 write tools — require an Admin or Engineer token |
+| `AETHER_ACCESS_TOKEN` | unset | Signed access JWT the `aether` CLI data plane and MCP attach to every gateway request. A Viewer token covers queries; governed writes — channel commissioning/lifecycle, device commands, action-routing changes, automation/alarm policy, and MCP's 22 write tools — require an Admin or Engineer token |
 | `AETHER_UPLINK_CONTROL_TOKEN` | unset | Separate 32-byte-or-longer service credential used only for uplink-to-automation device commands; installers generate it and never print it |
 | `AETHER_ALLOW_SIMULATION_WRITES` | `false` | Development-only opt-in for io T/S simulation writes into authoritative SHM; keep disabled in production |
 | `AETHER_CONFIG_PATH` | unset | Shared configuration directory used by automation and `aether mcp`; CLI path resolution may set it through deployment context or `--config-path` |

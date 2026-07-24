@@ -64,7 +64,7 @@ drift (see [Rule Engine](../concepts/rule-engine.md) for the invariant).
 
 automation serves the rule API (`services/automation/src/rule_routes.rs`);
 applications reach it through the authenticated gateway under
-`/api/v1/automation` (ADR-0021). The loopback Swagger UI at
+`/api/v1/automation`. The loopback Swagger UI at
 `http://localhost:6002/docs` remains the per-operation contract source.
 Every mutation below accepts only a Bearer Admin/Engineer actor, requires
 `confirmed: true` plus the gateway's `x-aether-confirmed: true` header, and
